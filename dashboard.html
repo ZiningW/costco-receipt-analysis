@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Costco Receipt Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Chart.js for the Monthly Spending Trend -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card-bg: #ffffff;
+      --accent: #2563eb;
+      --accent-soft: #e0edff;
+      --text-main: #111827;
+      --text-muted: #6b7280;
+      --border: #e5e7eb;
+      --danger: #dc2626;
+      --success: #16a34a;
+      --shadow-soft: 0 10px 25px rgba(15, 23, 42, 0.05);
+      --radius-lg: 18px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+    }
+
+    .page {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 16px 64px;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 1.8rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    header h1 span.icon {
+      font-size: 1.6rem;
+    }
+
+    header p {
+      margin: 4px 0 0;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .uploader {
+      padding: 10px 14px;
+      background: var(--card-bg);
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-soft);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.9rem;
+    }
+
+    .uploader label {
+      font-weight: 600;
+    }
+
+    .uploader input[type="file"] {
+      border: none;
+      font-size: 0.9rem;
+    }
+
+    .status {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .status.error {
+      color: var(--danger);
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .summary-card {
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      padding: 14px 16px;
+      box-shadow: var(--shadow-soft);
+      border: 1px solid var(--border);
+    }
+
+    .summary-card .label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .summary-card .value {
+      margin-top: 4px;
+      font-size: 1.35rem;
+      font-weight: 700;
+    }
+
+    .summary-card .sub {
+      margin-top: 2px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      padding: 16px 18px 14px;
+      box-shadow: var(--shadow-soft);
+      border: 1px solid var(--border);
+    }
+
+    .card h2 {
+      margin: 0 0 6px;
+      font-size: 1.1rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .card h2 .icon {
+      font-size: 1.1rem;
+    }
+
+    .card .subtitle {
+      margin: 0 0 10px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+
+    thead {
+      background: var(--accent-soft);
+    }
+
+    th, td {
+      padding: 6px 6px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    th:first-child,
+    td:first-child {
+      text-align: right;
+      width: 1%;
+    }
+
+    th:last-child,
+    td:last-child {
+      text-align: right;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #f9fafb;
+    }
+
+    tbody tr:hover {
+      background: #eef2ff;
+    }
+
+    .money {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+    }
+
+    .pos {
+      color: var(--success);
+    }
+
+    .neg {
+      color: var(--danger);
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+
+    .chart-wrapper {
+      margin-top: 12px;
+    }
+
+    canvas {
+      max-height: 360px;
+    }
+
+    @media (max-width: 640px) {
+      header {
+        align-items: flex-start;
+      }
+      .uploader {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div>
+        <h1><span class="icon">🧾</span>Costco Receipt Dashboard</h1>
+        <p>Upload your Costco receipts JSON to see spending insights.</p>
+      </div>
+      <div>
+        <div class="uploader">
+          <label for="fileInput">Receipts JSON:</label>
+          <input id="fileInput" type="file" accept="application/json,.json" />
+        </div>
+        <div id="status" class="status">No file loaded yet.</div>
+      </div>
+    </header>
+
+    <!-- Summary cards -->
+    <section class="summary-grid">
+      <div class="summary-card">
+        <div class="label">Total Purchases (items)</div>
+        <div class="value" id="totalPurchases">–</div>
+        <div class="sub">Total individual items bought</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Unique Items</div>
+        <div class="value" id="uniqueItems">–</div>
+        <div class="sub">Distinct Costco item codes</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Receipts</div>
+        <div class="value" id="receiptCount">–</div>
+        <div class="sub">Number of shopping trips</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Total Spent</div>
+        <div class="value" id="totalSpent">–</div>
+        <div class="sub">Including tax</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Avg Item Price</div>
+        <div class="value" id="avgItemPrice">–</div>
+        <div class="sub">Average price per purchased unit</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Avg Per Receipt</div>
+        <div class="value" id="avgPerReceipt">–</div>
+        <div class="sub">Average spend per trip</div>
+      </div>
+    </section>
+
+    <!-- Top tables -->
+    <section class="grid-2">
+      <div class="card">
+        <h2><span class="icon">💰</span>Most Total Spent Items</h2>
+        <p class="subtitle">Items you've spent the most money on overall.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Total Spent</th>
+              <th>Times Bought</th>
+              <th>Avg Price</th>
+            </tr>
+          </thead>
+          <tbody id="mostTotalSpentBody">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2><span class="icon">📈</span>Biggest Price Increases</h2>
+        <p class="subtitle">Items that increased in price the most over time.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Min → Max</th>
+              <th>Increase</th>
+              <th>Period</th>
+              <th>Rate / Month</th>
+            </tr>
+          </thead>
+          <tbody id="priceIncreaseBody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2><span class="icon">💎</span>Most Expensive Items</h2>
+        <p class="subtitle">By average price (min 3 purchases).</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Avg Price</th>
+              <th>Max Price</th>
+              <th>Purchases</th>
+            </tr>
+          </thead>
+          <tbody id="mostExpensiveBody">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2><span class="icon">🔥</span>Most Purchased Items</h2>
+        <p class="subtitle">By number of units purchased.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Times Bought</th>
+              <th>Avg Price</th>
+              <th>Min → Max</th>
+              <th>Increase %</th>
+            </tr>
+          </thead>
+          <tbody id="mostPurchasedBody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2><span class="icon">📊</span>Monthly Spending Trend</h2>
+      <p class="subtitle">Total spent per month.</p>
+      <div class="chart-wrapper">
+        <canvas id="monthlyChart"></canvas>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const currencyFormatter = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+    function formatMoney(v) {
+      return currencyFormatter.format(v || 0);
+    }
+
+    function monthsBetween(d1, d2) {
+      const msPerMonth = 1000 * 60 * 60 * 24 * 30.4375;
+      return Math.abs(d2 - d1) / msPerMonth;
+    }
+
+    function processReceipts(receipts) {
+      const itemStats = new Map(); // key -> stats
+      const monthlyTotals = new Map(); // "YYYY-MM" -> total
+      let totalSpent = 0;
+      let sumItemAmounts = 0;
+      let totalUnits = 0;
+
+      receipts.forEach((receipt) => {
+        const total = Number(receipt.total) || 0;
+        totalSpent += total;
+
+        const monthKey = (receipt.transactionDate || "").slice(0, 7); // YYYY-MM
+        if (monthKey) {
+          monthlyTotals.set(
+            monthKey,
+            (monthlyTotals.get(monthKey) || 0) + total
+          );
+        }
+
+        const items = Array.isArray(receipt.itemArray)
+          ? receipt.itemArray
+          : [];
+        const dateStr =
+          receipt.transactionDateTime ||
+          (receipt.transactionDate
+            ? receipt.transactionDate + "T00:00:00"
+            : null);
+        const trxDate = dateStr ? new Date(dateStr) : new Date();
+
+        items.forEach((item) => {
+          const unit = Number(item.unit) || 0;
+          const amount = Number(item.amount) || 0;
+
+          // Skip coupons / negative adjustments / weird lines
+          if (!item.itemNumber || unit <= 0 || amount <= 0) return;
+
+          const key =
+            item.itemNumber + "|" + (item.itemDescription01 || "").trim();
+          const name = (item.itemDescription01 || "").trim();
+
+          const perUnitPrice = amount / unit;
+
+          let stat = itemStats.get(key);
+          if (!stat) {
+            stat = {
+              itemNumber: item.itemNumber,
+              name,
+              totalSpent: 0,
+              totalUnits: 0,
+              purchases: 0,
+              prices: [], // {date, price}
+            };
+            itemStats.set(key, stat);
+          }
+
+          stat.totalSpent += amount;
+          stat.totalUnits += unit;
+          stat.purchases += unit;
+          stat.prices.push({ date: trxDate, price: perUnitPrice });
+
+          sumItemAmounts += amount;
+          totalUnits += unit;
+        });
+      });
+
+      const receiptsCount = receipts.length;
+      const uniqueItems = itemStats.size;
+      const avgItemPrice =
+        totalUnits > 0 ? sumItemAmounts / totalUnits : 0;
+      const avgPerReceipt =
+        receiptsCount > 0 ? totalSpent / receiptsCount : 0;
+
+      return {
+        itemStats,
+        monthlyTotals,
+        summary: {
+          totalSpent,
+          totalUnits,
+          receiptsCount,
+          uniqueItems,
+          avgItemPrice,
+          avgPerReceipt,
+        },
+      };
+    }
+
+    function renderSummary(summary) {
+      document.getElementById("totalPurchases").textContent =
+        summary.totalUnits.toLocaleString();
+      document.getElementById("uniqueItems").textContent =
+        summary.uniqueItems.toLocaleString();
+      document.getElementById("receiptCount").textContent =
+        summary.receiptsCount.toLocaleString();
+      document.getElementById("totalSpent").textContent =
+        formatMoney(summary.totalSpent);
+      document.getElementById("avgItemPrice").textContent =
+        formatMoney(summary.avgItemPrice);
+      document.getElementById("avgPerReceipt").textContent =
+        formatMoney(summary.avgPerReceipt);
+    }
+
+    function renderMostTotalSpent(itemStats) {
+      const tbody = document.getElementById("mostTotalSpentBody");
+      tbody.innerHTML = "";
+
+      const rows = Array.from(itemStats.values())
+        .sort((a, b) => b.totalSpent - a.totalSpent)
+        .slice(0, 10);
+
+      rows.forEach((row, idx) => {
+        const tr = document.createElement("tr");
+
+        const rankTd = document.createElement("td");
+        rankTd.textContent = idx + 1;
+        tr.appendChild(rankTd);
+
+        const itemTd = document.createElement("td");
+        itemTd.innerHTML =
+          "<strong>" +
+          row.name +
+          "</strong><br/><span class='status'>#" +
+          row.itemNumber +
+          "</span>";
+        tr.appendChild(itemTd);
+
+        const totalTd = document.createElement("td");
+        totalTd.className = "money";
+        totalTd.textContent = formatMoney(row.totalSpent);
+        tr.appendChild(totalTd);
+
+        const timesTd = document.createElement("td");
+        timesTd.textContent = row.purchases + "×";
+        tr.appendChild(timesTd);
+
+        const avgTd = document.createElement("td");
+        avgTd.className = "money";
+        avgTd.textContent = formatMoney(
+          row.totalSpent / row.purchases
+        );
+        tr.appendChild(avgTd);
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderMostPurchased(itemStats) {
+      const tbody = document.getElementById("mostPurchasedBody");
+      tbody.innerHTML = "";
+
+      const rows = Array.from(itemStats.values())
+        .sort((a, b) => b.purchases - a.purchases)
+        .slice(0, 10);
+
+      rows.forEach((row, idx) => {
+        const tr = document.createElement("tr");
+
+        // Rank
+        const rankTd = document.createElement("td");
+        rankTd.textContent = idx + 1;
+        tr.appendChild(rankTd);
+
+        // Item info
+        const itemTd = document.createElement("td");
+        itemTd.innerHTML =
+          "<strong>" +
+          row.name +
+          "</strong><br/><span class='status'>#" +
+          row.itemNumber +
+          "</span>";
+        tr.appendChild(itemTd);
+
+        // Times bought
+        const timesTd = document.createElement("td");
+        timesTd.textContent = row.purchases + "×";
+        tr.appendChild(timesTd);
+
+        // Avg price
+        const avgTd = document.createElement("td");
+        avgTd.className = "money";
+        avgTd.textContent = formatMoney(row.totalSpent / row.purchases);
+        tr.appendChild(avgTd);
+
+        // Min → Max
+        let min = Infinity;
+        let max = -Infinity;
+        row.prices.forEach((p) => {
+          if (p.price < min) min = p.price;
+          if (p.price > max) max = p.price;
+        });
+
+        const minMaxTd = document.createElement("td");
+        minMaxTd.className = "money";
+        minMaxTd.innerHTML = `${formatMoney(min)} → ${formatMoney(max)}`;
+        tr.appendChild(minMaxTd);
+
+        // Increase %
+        const incPct =
+          min > 0 ? ((max - min) / min) * 100 : 0;
+
+        const pctTd = document.createElement("td");
+        pctTd.className = incPct > 0 ? "pos" : "status";
+        pctTd.textContent = incPct > 0 
+          ? "+" + incPct.toFixed(1) + "%"
+          : "0%";
+        tr.appendChild(pctTd);
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderMostExpensive(itemStats) {
+      const tbody = document.getElementById("mostExpensiveBody");
+      tbody.innerHTML = "";
+
+      const rows = Array.from(itemStats.values())
+        .filter((s) => s.purchases >= 3)
+        .map((s) => {
+          const avg = s.totalSpent / s.purchases;
+          const max = s.prices.reduce(
+            (m, p) => Math.max(m, p.price),
+            0
+          );
+          return { ...s, avgPrice: avg, maxPrice: max };
+        })
+        .sort((a, b) => b.avgPrice - a.avgPrice)
+        .slice(0, 10);
+
+      rows.forEach((row, idx) => {
+        const tr = document.createElement("tr");
+
+        const rankTd = document.createElement("td");
+        rankTd.textContent = idx + 1;
+        tr.appendChild(rankTd);
+
+        const itemTd = document.createElement("td");
+        itemTd.innerHTML =
+          "<strong>" +
+          row.name +
+          "</strong><br/><span class='status'>#" +
+          row.itemNumber +
+          "</span>";
+        tr.appendChild(itemTd);
+
+        const avgTd = document.createElement("td");
+        avgTd.className = "money";
+        avgTd.textContent = formatMoney(row.avgPrice);
+        tr.appendChild(avgTd);
+
+        const maxTd = document.createElement("td");
+        maxTd.className = "money";
+        maxTd.textContent = formatMoney(row.maxPrice);
+        tr.appendChild(maxTd);
+
+        const purchasesTd = document.createElement("td");
+        purchasesTd.textContent = row.purchases + "×";
+        tr.appendChild(purchasesTd);
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderPriceIncreases(itemStats) {
+      const tbody = document.getElementById("priceIncreaseBody");
+      tbody.innerHTML = "";
+
+      const rows = [];
+
+      itemStats.forEach((s) => {
+        if (s.prices.length < 2) return;
+
+        let minPrice = Infinity;
+        let maxPrice = -Infinity;
+        let minDate = null;
+        let maxDate = null;
+
+        s.prices.forEach((p) => {
+          if (p.price < minPrice) {
+            minPrice = p.price;
+            minDate = p.date;
+          }
+          if (p.price > maxPrice) {
+            maxPrice = p.price;
+            maxDate = p.date;
+          }
+        });
+
+        const increase = maxPrice - minPrice;
+        if (increase <= 0.01 || !minDate || !maxDate) return;
+
+        const months = monthsBetween(minDate, maxDate);
+        if (months < 0.01) return;
+        if (["155", "712309"].includes(String(s.itemNumber))) return;
+
+        rows.push({
+          name: s.name,
+          itemNumber: s.itemNumber,
+          minPrice,
+          maxPrice,
+          increase,
+          months,
+          ratePerMonth: increase / months,
+        });
+      });
+
+      rows
+        .sort((a, b) => b.increase - a.increase)
+        .slice(0, 10)
+        .forEach((row, idx) => {
+          const tr = document.createElement("tr");
+
+          const rankTd = document.createElement("td");
+          rankTd.textContent = idx + 1;
+          tr.appendChild(rankTd);
+
+          const itemTd = document.createElement("td");
+          itemTd.innerHTML =
+            "<strong>" +
+            row.name +
+            "</strong><br/><span class='status'>#" +
+            row.itemNumber +
+            "</span>";
+          tr.appendChild(itemTd);
+
+          const minMaxTd = document.createElement("td");
+          minMaxTd.className = "money";
+          minMaxTd.innerHTML =
+            formatMoney(row.minPrice) +
+            " → " +
+            formatMoney(row.maxPrice);
+          tr.appendChild(minMaxTd);
+
+          const incTd = document.createElement("td");
+          incTd.className = "money pos";
+          incTd.textContent =
+            "+" + formatMoney(row.increase);
+          tr.appendChild(incTd);
+
+          const periodTd = document.createElement("td");
+          periodTd.textContent =
+            row.months.toFixed(1) + " months";
+          tr.appendChild(periodTd);
+
+          const rateTd = document.createElement("td");
+          rateTd.className = "money pos";
+          rateTd.textContent =
+            "+" +
+            formatMoney(row.ratePerMonth) +
+            "/mo";
+          tr.appendChild(rateTd);
+
+          tbody.appendChild(tr);
+        });
+    }
+
+    let monthlyChart;
+
+    function renderMonthlyChart(monthlyTotals) {
+      const ctx = document
+        .getElementById("monthlyChart")
+        .getContext("2d");
+
+      const entries = Array.from(monthlyTotals.entries()).sort(
+        (a, b) => (a[0] < b[0] ? -1 : 1)
+      );
+      const labels = entries.map(([m]) => m);
+      const data = entries.map(([, v]) => v);
+
+      if (monthlyChart) {
+        monthlyChart.destroy();
+      }
+
+      monthlyChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Amount Spent ($)",
+              data,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+            },
+          },
+          plugins: {
+            legend: {
+              display: false,
+            },
+          },
+        },
+      });
+    }
+
+    function handleData(receipts) {
+      const { itemStats, monthlyTotals, summary } =
+        processReceipts(receipts);
+
+      renderSummary(summary);
+      renderMostTotalSpent(itemStats);
+      renderMostPurchased(itemStats);
+      renderMostExpensive(itemStats);
+      renderPriceIncreases(itemStats);
+      renderMonthlyChart(monthlyTotals);
+    }
+
+    // File input handler (standalone usage)
+    document
+      .getElementById("fileInput")
+      .addEventListener("change", (e) => {
+        const statusEl = document.getElementById("status");
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const json = JSON.parse(event.target.result);
+            if (!Array.isArray(json)) {
+              throw new Error(
+                "Expected the JSON to be an array of receipts."
+              );
+            }
+            statusEl.textContent = `Loaded ${json.length.toLocaleString()} receipts.`;
+            statusEl.classList.remove("error");
+            handleData(json);
+          } catch (err) {
+            console.error(err);
+            statusEl.textContent =
+              "Error reading file: " + err.message;
+            statusEl.classList.add("error");
+          }
+        };
+        reader.readAsText(file);
+      });
+
+    // --- Extension integration: auto-load receipts if opened from the extension ---
+    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+      const statusEl = document.getElementById("status");
+
+      chrome.runtime.sendMessage({ type: "getReceipts" }, (resp) => {
+        if (chrome.runtime.lastError) {
+          console.warn("No receipts from extension:", chrome.runtime.lastError);
+          return;
+        }
+        if (resp && Array.isArray(resp.receipts) && resp.receipts.length) {
+          statusEl.textContent = `Loaded ${resp.receipts.length.toLocaleString()} receipts from extension.`;
+          statusEl.classList.remove("error");
+          handleData(resp.receipts);
+        }
+      });
+    }
+  </script>
+</body>
+</html>
