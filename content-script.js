@@ -152,85 +152,33 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
               documentType: $documentType
               documentSubType: $documentSubType
             ) {
-              inWarehouse
-              gasStation
-              carWash
-              gasAndCarWash
               receipts {
                 warehouseName
                 warehouseShortName
-                receiptType
-                documentType
+                warehouseCity
+                warehouseNumber
                 transactionDateTime
                 transactionDate
                 transactionBarcode
                 transactionNumber
-                transactionType
-                companyNumber
-                warehouseNumber
-                operatorNumber
                 registerNumber
+                operatorNumber
                 total
-                warehouseAddress1
-                warehouseAddress2
-                warehouseCity
-                warehouseState
-                warehouseCountry
-                warehousePostalCode
-                totalItemCount
                 subTotal
                 taxes
-                instantSavings
-                membershipNumber
                 itemArray {
                   itemNumber
                   itemDescription01
-                  frenchItemDescription1
                   itemDescription02
-                  frenchItemDescription2
-                itemIdentifier
-                unit
-                amount
-                itemUnitPriceAmount
-                fuelUnitQuantity
-                taxFlag
-                merchantID
-                entryMethod
-              }
+                  unit
+                  amount
+                  itemUnitPriceAmount
+                  fuelUnitQuantity
+                }
                 tenderArray {
-                  tenderTypeCode
                   tenderDescription
+                  tenderTypeName
                   amountTender
-                  displayAccountNumber
-                  sequenceNumber
-                  approvalNumber
-                  responseCode
-                  transactionID
-                  merchantID
-                  entryMethod
-                }
-                couponArray {
-                  upcnumberCoupon
-                  voidflagCoupon
-                  refundflagCoupon
-                  taxflagCoupon
-                  amountCoupon
-                }
-                subTaxes {
-                  tax1
-                  tax2
-                  tax3
-                  tax4
-                  aTaxPercent
-                  aTaxLegend
-                  aTaxAmount
-                  bTaxPercent
-                  bTaxLegend
-                  bTaxAmount
-                  cTaxPercent
-                  cTaxLegend
-                  cTaxAmount
-                  dTaxAmount
                 }
               }
             }
@@ -246,7 +194,6 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
 
       xhr.onload = function () {
         if (xhr.status === 200 && xhr.response && xhr.response.data) {
-          console.log("Costco Damages Extension: receipts response", xhr.response);
           const result = xhr.response.data.receiptsWithCounts;
           resolve((result && result.receipts) || []);
         } else {
@@ -276,11 +223,6 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
     const dedup = new Map();
     const numbers = ["847"];
     for (const warehouseNumber of numbers) {
-      console.log("Costco Damages Extension: querying online orders", {
-        warehouseNumber,
-        startDate,
-        endDate
-      });
       let pageNumber = 1;
       const pageSize = 100;
       let totalRecords = Infinity;
@@ -349,17 +291,6 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
           );
           xhr.onload = function () {
             if (xhr.status === 200 && xhr.response && xhr.response.data) {
-              console.log(
-                "Costco Damages Extension: online orders page result",
-                {
-                  warehouseNumber,
-                  pageNumber,
-                  pageSize,
-                  totalNumberOfRecords: xhr.response.data.getOnlineOrders?.totalNumberOfRecords,
-                  orderCount:
-                    xhr.response.data.getOnlineOrders?.bcOrders?.length || 0
-                }
-              );
               resolve(xhr.response.data.getOnlineOrders);
             } else {
               reject(
@@ -407,26 +338,14 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
   const ORDER_DETAILS_QUERY = `
     query getOrderDetails($orderNumbers: [String]) {
       getOrderDetails(orderNumbers:$orderNumbers) {
-        warehouseNumber
         orderNumber : sourceOrderNumber
         orderPlacedDate : orderedDate
         status
-        orderReturnAllowed
-        shopCardAppliedAmount
-        walletShopCardAppliedAmount
-        giftOfMembershipAppliedAmount
-        orderCancelAllowed
-        orderPaymentFailed : orderPaymentEditAllowed
         merchandiseTotal
         retailDeliveryFee
         shippingAndHandling
         grocerySurcharge
-        frozenSurchargeFee
         uSTaxTotal1
-        foreignTaxTotal1
-        foreignTaxTotal2
-        foreignTaxTotal3
-        foreignTaxTotal4
         orderTotal
         orderPayment {
           paymentType
@@ -439,34 +358,13 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
           orderLineItems {
             orderStatus
             itemNumber
+            itemId
             itemDescription : sourceItemDescription
             price : unitPrice
             quantity : orderedTotalQuantity
             merchandiseTotalAmount
-            lineItemId
-            itemId
             programType
             returnStatus
-            productSerialNumber
-            orderLineItemCancelAllowed
-            itemStatus {
-              orderPlaced {
-                quantity
-                transactionDate
-              }
-              shipped {
-                quantity
-                transactionDate
-              }
-              cancelled {
-                quantity
-                transactionDate
-              }
-              returned {
-                quantity
-                transactionDate
-              }
-            }
           }
         }
       }
@@ -521,13 +419,10 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
       }
       /* eslint-enable no-await-in-loop */
     }
-    console.log(
-      "Costco Damages Extension: order detail fetch complete",
-      {
-        requested: orderNumbers.length,
-        fetched: Object.keys(details).length
-      }
-    );
+    console.log("Costco Damages Extension: order detail fetch complete", {
+      requested: orderNumbers.length,
+      fetched: Object.keys(details).length
+    });
     if (typeof reportProgress === "function") {
       reportProgress("Finishing up...");
     }
