@@ -21,7 +21,7 @@ function persistReceipts(receipts, warehouseDetails, onlineOrders, orderDetails)
     chrome.storage.local.set({ [RECEIPT_STORAGE_KEY]: payload }, () => {
       if (chrome.runtime.lastError) {
         console.warn(
-          "Costco Receipts Extension: failed to store receipts",
+          "Costco Damages Extension: failed to store receipts",
           chrome.runtime.lastError
         );
         resolve(false);
@@ -74,7 +74,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.local.get(RECEIPT_STORAGE_KEY, (result) => {
       if (chrome.runtime.lastError) {
         console.warn(
-          "Costco Receipts Extension: failed loading receipts from storage",
+          "Costco Damages Extension: failed loading receipts from storage",
           chrome.runtime.lastError
         );
       }
@@ -118,7 +118,7 @@ if (chrome.contextMenus) {
           contexts: ["action"]
         });
       } catch (err) {
-        console.warn("Costco Receipts Extension: could not create context menu", err);
+        console.warn("Costco Damages Extension: could not create context menu", err);
       }
     });
   });

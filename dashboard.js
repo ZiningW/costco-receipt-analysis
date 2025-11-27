@@ -39,6 +39,9 @@ const chartCanvas = document.getElementById("metricsChart");
 const chartControls = document.getElementById("chartControls");
 const chartSubtitle = document.getElementById("chartSubtitle");
 const chartTooltip = document.getElementById("chartTooltip");
+const ROTISSERIE_LABEL = "🍗";
+const ROTISSERIE_TOOLTIP = "Rotisserie Chicken";
+const ROTISSERIE_CARD_CLASS = "rotisserie-card";
 let activeTab = "all";
 let latestSummaryPayload = null;
 let storedOnlineOrderDetails = {};
@@ -575,6 +578,8 @@ function processReceipts(receipts) {
   let returnCount = 0;
   let returnAmount = 0;
   let totalTax = 0;
+  let rotisserieSpent = 0;
+  let rotisserieCount = 0;
 
   receipts.forEach((receipt) => {
     const total = Number(receipt.total) || 0;
@@ -595,6 +600,7 @@ function processReceipts(receipts) {
       (receipt.transactionDate ? `${receipt.transactionDate}T00:00:00` : null);
     const trxDate = dateStr ? new Date(dateStr) : new Date();
     let receiptUnits = 0;
+    let receiptRotisserieUnits = 0;
 
     items.forEach((item) => {
       const unit = Number(item.unit) || 0;
@@ -634,6 +640,11 @@ function processReceipts(receipts) {
         sumItemAmounts += amount;
         totalUnits += unit;
         receiptUnits += unit;
+        if (String(item.itemNumber || "").trim() === "87745") {
+          rotisserieSpent += amount;
+          rotisserieCount += unit;
+          receiptRotisserieUnits += unit;
+        }
       }
 
       if (isGas) {
@@ -727,12 +738,13 @@ function processReceipts(receipts) {
         if (monthKey) {
           let entry = monthlyWarehouse.get(monthKey);
           if (!entry) {
-            entry = { spent: 0, trips: 0, items: 0, locations: new Map() };
+            entry = { spent: 0, trips: 0, items: 0, rotisserie: 0, locations: new Map() };
             monthlyWarehouse.set(monthKey, entry);
           }
           entry.spent += total;
           entry.trips += 1;
           entry.items += receiptUnits;
+          entry.rotisserie = (entry.rotisserie || 0) + receiptRotisserieUnits;
           entry.locations.set(location, (entry.locations.get(location) || 0) + 1);
         }
       }
@@ -762,6 +774,8 @@ function processReceipts(receipts) {
       returnAmount,
       gasStatsTotal: gasStats.totalCost,
       totalTax,
+      rotisserieSpent,
+      rotisserieCount,
       dateRange: {
         start: dateRange.start ? dateFormatter.format(dateRange.start) : null,
         end: dateRange.end ? dateFormatter.format(dateRange.end) : null
@@ -895,12 +909,16 @@ function renderSummary(summary, onlineData, gasStats, warehouseVisits) {
     gasLocationMap
   );
 
-  cards.forEach(({ label, value, sub, negative }) => {
+  cards.forEach(({ label, value, sub, negative, className, title }) => {
     const card = document.createElement("div");
-    card.className = "summary-card";
+    card.className = className ? `summary-card ${className}` : "summary-card";
     const labelEl = document.createElement("div");
     labelEl.className = "label";
     labelEl.textContent = label;
+    if (title) {
+      labelEl.title = title;
+      card.title = title;
+    }
     const valueEl = document.createElement("div");
     valueEl.className = negative ? "value negative" : "value";
     valueEl.textContent = value;
@@ -948,8 +966,11 @@ function buildSummaryCards(
         value: `${formatMoney(netWarehouseSpent)}`,
         sub: `Tax: ${formatMoney(summary.totalTax || 0)}`
       },
-      { label: "Total Items", value: summary.totalUnits.toLocaleString() },
-      { label: "Unique Items", value: summary.uniqueItems.toLocaleString() },
+      {
+        label: "Items",
+        value: summary.totalUnits.toLocaleString(),
+        sub: `${summary.uniqueItems.toLocaleString()} unique`
+      },
       { label: "Avg Item Price", value: formatMoney(summary.avgItemPrice) },
       { label: "Avg Per Receipt", value: formatMoney(summary.avgPerReceipt) },
       {
@@ -957,6 +978,13 @@ function buildSummaryCards(
         value: formatReturnAmount(summary.returnAmount),
         sub: `${formatReturnCount(summary.returnCount)} returns`,
         negative: true
+      },
+      {
+        label: ROTISSERIE_LABEL,
+        value: formatMoney(summary.rotisserieSpent || 0),
+        sub: `${(summary.rotisserieCount || 0).toLocaleString()} purchased`,
+        title: ROTISSERIE_TOOLTIP,
+        className: ROTISSERIE_CARD_CLASS
       }
     ];
     locations = warehouseLocations;
@@ -980,8 +1008,11 @@ function buildSummaryCards(
         value: `${formatMoney(netOnlineSpent)}`,
         sub: `Tax: ${formatMoney(onlineData.totalTax || 0)}`
       },
-      { label: "Total Items", value: totalItems.toLocaleString() },
-      { label: "Unique Items", value: uniqueItems.toLocaleString() },
+      {
+        label: "Items",
+        value: totalItems.toLocaleString(),
+        sub: `${uniqueItems.toLocaleString()} unique`
+      },
       { label: "Avg Item Price", value: avgItemPrice },
       { label: "Avg Per Receipt", value: avgPerOrder },
       {
@@ -1031,6 +1062,13 @@ function buildSummaryCards(
         value: formatReturnAmount((summary.returnAmount || 0) + (onlineData.returnAmount || 0)),
         sub: `${formatReturnCount((summary.returnCount || 0) + (onlineData.returnCount || 0))} returns`,
         negative: true
+      },
+      {
+        label: ROTISSERIE_LABEL,
+        value: formatMoney(summary.rotisserieSpent || 0),
+        sub: `${(summary.rotisserieCount || 0).toLocaleString()} purchased`,
+        title: ROTISSERIE_TOOLTIP,
+        className: ROTISSERIE_CARD_CLASS
       }
     ];
     locations = mergeLocationMaps([
@@ -1605,6 +1643,16 @@ const CHART_METRICS = {
       id: "allAvg",
       label: "Avg Spend per Trip",
       builder: (data) => buildAverageSeries(data.all, (entry) => entry.spent, (entry) => entry.trips, formatMoney)
+    },
+    {
+      id: "allRotisserie",
+      label: ROTISSERIE_LABEL,
+      tooltip: ROTISSERIE_TOOLTIP,
+      isRotisserie: true,
+      builder: (data) =>
+        buildSimpleSeries(data.all, (entry) => entry.rotisserie || 0, formatNumber, {
+          integerTicks: true
+        })
     }
   ],
   warehouse: [
@@ -1626,6 +1674,16 @@ const CHART_METRICS = {
       id: "warehouseAvg",
       label: "Avg Spend per Trip",
       builder: (data) => buildAverageSeries(data.warehouse, (entry) => entry.spent, (entry) => entry.trips, formatMoney)
+    },
+    {
+      id: "warehouseRotisserie",
+      label: ROTISSERIE_LABEL,
+      tooltip: ROTISSERIE_TOOLTIP,
+      isRotisserie: true,
+      builder: (data) =>
+        buildSimpleSeries(data.warehouse, (entry) => entry.rotisserie || 0, formatNumber, {
+          integerTicks: true
+        })
     }
   ],
   online: [
@@ -1706,6 +1764,14 @@ function updateChartControls() {
     btn.type = "button";
     btn.textContent = option.label;
     btn.className = "chart-control-button";
+    if (option.isRotisserie) {
+      btn.classList.add("rotisserie-option");
+      btn.title = option.tooltip || ROTISSERIE_TOOLTIP;
+    } else if (option.tooltip) {
+      btn.title = option.tooltip;
+    } else {
+      btn.title = option.label;
+    }
     if (chartState.currentMetric[activeTab] === option.id) {
       btn.classList.add("active");
     }
@@ -1766,6 +1832,7 @@ function normalizeWarehouseMonthly(map) {
       spent: data.spent || 0,
       trips: data.trips || 0,
       items: data.items || 0,
+      rotisserie: data.rotisserie || 0,
       locations: data.locations ? new Map(data.locations) : new Map()
     }))
     .sort((a, b) => a.month.localeCompare(b.month));
@@ -1809,6 +1876,7 @@ function buildAllMonthly(warehouseEntries, onlineEntries, gasEntries) {
         spent: 0,
         trips: 0,
         items: 0,
+        rotisserie: 0,
         locations: new Map()
       };
       combined.set(month, entry);
@@ -1821,6 +1889,7 @@ function buildAllMonthly(warehouseEntries, onlineEntries, gasEntries) {
     combinedEntry.spent += entry.spent || 0;
     combinedEntry.trips += entry.trips || 0;
     combinedEntry.items += entry.items || 0;
+    combinedEntry.rotisserie += entry.rotisserie || 0;
     entry.locations?.forEach((count, loc) => {
       combinedEntry.locations.set(loc, (combinedEntry.locations.get(loc) || 0) + count);
     });
@@ -2249,7 +2318,7 @@ function loadReceiptsFromStorage() {
   chrome.storage.local.get(EXTENSION_STORAGE_KEY, (result) => {
     if (chrome.runtime?.lastError) {
       console.warn(
-        "Costco Receipts Dashboard: could not read storage",
+        "Costco Damages Dashboard: could not read storage",
         chrome.runtime.lastError
       );
       return;

@@ -1,16 +1,16 @@
 // content-script.js
 
-console.log("Costco Receipts Extension: content script loaded on", location.href);
+console.log("Costco Damages Extension: content script loaded on", location.href);
 
 (function () {
   // Avoid duplicates if something causes the script to run multiple times
   let existing = document.getElementById("costco-receipts-download-btn");
   if (existing) {
-    console.log("Costco Receipts Extension: button already exists, not adding again");
+    console.log("Costco Damages Extension: button already exists, not adding again");
     return;
   }
 
-  console.log("Costco Receipts Extension: injecting button");
+  console.log("Costco Damages Extension: injecting button");
 
   // Create a floating button
   const btn = document.createElement("button");
@@ -86,9 +86,9 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
           },
           (resp) => {
             if (chrome.runtime.lastError) {
-              console.warn("Costco Receipts Extension: error sending data to background:", chrome.runtime.lastError);
+              console.warn("Costco Damages Extension: error sending data to background:", chrome.runtime.lastError);
             } else {
-              console.log("Costco Receipts Extension: receipts sent to background, dashboard should open.", resp);
+              console.log("Costco Damages Extension: receipts sent to background, dashboard should open.", resp);
             }
           }
         );
@@ -103,7 +103,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
       btn.textContent = "View Spending Summary";
       btn.disabled = false;
     } catch (err) {
-      console.error("Costco Receipts Extension: error downloading receipts", err);
+      console.error("Costco Damages Extension: error downloading receipts", err);
       alert("Error downloading receipts. Check the console for details.");
       btn.textContent = "View Spending Summary";
       btn.disabled = false;
@@ -115,7 +115,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
   // -------- API logic ----------
 
   async function listReceipts(startDate, endDate) {
-    console.log("Costco Receipts Extension: listReceipts", { startDate, endDate });
+    console.log("Costco Damages Extension: listReceipts", { startDate, endDate });
 
     return await new Promise(function (resolve, reject) {
       const xhr = new XMLHttpRequest();
@@ -246,11 +246,11 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
 
       xhr.onload = function () {
         if (xhr.status === 200 && xhr.response && xhr.response.data) {
-          console.log("Costco Receipts Extension: receipts response", xhr.response);
+          console.log("Costco Damages Extension: receipts response", xhr.response);
           const result = xhr.response.data.receiptsWithCounts;
           resolve((result && result.receipts) || []);
         } else {
-          console.error("Costco Receipts Extension: bad status", xhr.status, xhr.response);
+          console.error("Costco Damages Extension: bad status", xhr.status, xhr.response);
           reject(
             new Error(
               "Request failed with status " +
@@ -263,7 +263,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
       };
 
       xhr.onerror = function () {
-        console.error("Costco Receipts Extension: network error");
+        console.error("Costco Damages Extension: network error");
         reject(new Error("Network error"));
       };
 
@@ -272,11 +272,11 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
   }
 
   async function listOnlineOrders(startDate, endDate) {
-    console.log("Costco Receipts Extension: listOnlineOrders start", { startDate, endDate });
+    console.log("Costco Damages Extension: listOnlineOrders start", { startDate, endDate });
     const dedup = new Map();
     const numbers = ["847"];
     for (const warehouseNumber of numbers) {
-      console.log("Costco Receipts Extension: querying online orders", {
+      console.log("Costco Damages Extension: querying online orders", {
         warehouseNumber,
         startDate,
         endDate
@@ -350,7 +350,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
           xhr.onload = function () {
             if (xhr.status === 200 && xhr.response && xhr.response.data) {
               console.log(
-                "Costco Receipts Extension: online orders page result",
+                "Costco Damages Extension: online orders page result",
                 {
                   warehouseNumber,
                   pageNumber,
@@ -377,7 +377,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
           };
           xhr.send(JSON.stringify({ query, variables }));
         }).catch((err) => {
-          console.warn("Costco Receipts Extension: online orders error", err);
+          console.warn("Costco Damages Extension: online orders error", err);
           return null;
         });
 
@@ -492,7 +492,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
       }
       return {};
     }
-    console.log("Costco Receipts Extension: fetching order details", {
+    console.log("Costco Damages Extension: fetching order details", {
       totalOrders: orderNumbers.length
     });
     const details = {};
@@ -514,7 +514,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
         }
       } catch (err) {
         console.warn(
-          "Costco Receipts Extension: order detail fetch failed",
+          "Costco Damages Extension: order detail fetch failed",
           { orderNumber: number },
           err
         );
@@ -522,7 +522,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
       /* eslint-enable no-await-in-loop */
     }
     console.log(
-      "Costco Receipts Extension: order detail fetch complete",
+      "Costco Damages Extension: order detail fetch complete",
       {
         requested: orderNumbers.length,
         fetched: Object.keys(details).length
@@ -617,7 +617,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
     const onlineOrders = await listOnlineOrders(startDateStr, endDateStr);
     const orderDetails = await fetchOnlineOrderDetails(onlineOrders, reportProgress);
     console.log({
-      message: "Costco Receipts Extension: fetch complete",
+      message: "Costco Damages Extension: fetch complete",
       receiptCount: receipts.length,
       onlineOrderCount: onlineOrders.length,
       warehouseDetailCount: Object.keys(warehouseDetails).length,

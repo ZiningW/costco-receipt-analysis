@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Costco Receipt Dashboard</title>
+  <title>Costco Damages Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -141,11 +141,20 @@
       font-size: 0.85rem;
       cursor: pointer;
     }
+    .chart-control-button.rotisserie-option {
+      border-color: #d6a66a;
+      color: #a16207;
+    }
 
     .chart-control-button.active {
       background: var(--accent);
       border-color: var(--accent);
       color: #fff;
+    }
+    .chart-control-button.rotisserie-option.active {
+      background: #d6a66a;
+      border-color: #a16207;
+      color: #452103;
     }
 
     .chart-canvas-wrapper {
@@ -260,12 +269,18 @@
       box-shadow: var(--shadow-soft);
       border: 1px solid var(--border);
     }
+    .summary-card.rotisserie-card {
+      border-color: #d6a66a;
+    }
 
     .summary-card .label {
       font-size: 0.8rem;
       text-transform: uppercase;
       letter-spacing: 0.06em;
       color: var(--text-muted);
+    }
+    .summary-card.rotisserie-card .label {
+      color: #a16207;
     }
 
     .summary-card .value {
@@ -547,7 +562,7 @@
   <div class="page">
     <header>
       <div>
-        <h1><span class="icon">🧾</span>Costco Receipt Dashboard</h1>
+        <h1><span class="icon">🧾</span>Costco Damages Dashboard</h1>
         <p id="status" class="status">No receipts loaded yet.</p>
         <div class="controls">
           <label for="datePreset">Range:</label>
