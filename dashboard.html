@@ -5,9 +5,6 @@
   <title>Costco Receipt Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Chart.js for the Monthly Spending Trend -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
   <style>
     :root {
       --bg: #f5f7fb;
@@ -66,6 +63,90 @@
       margin: 4px 0 0;
       color: var(--text-muted);
       font-size: 0.95rem;
+    }
+
+    .controls {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .controls select {
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      padding: 4px 8px;
+      font-size: 0.9rem;
+    }
+
+    .controls input[type="date"] {
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      padding: 4px 8px;
+      font-size: 0.9rem;
+    }
+
+    .controls button {
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .top-locations-card {
+      margin: 16px 0 32px;
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      padding: 16px;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .top-locations-card h3 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .tab-button {
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      color: var(--text-main);
+      border-radius: 999px;
+      padding: 6px 14px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    .tab-button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .table-scroll {
+      max-height: 320px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
     }
 
     .uploader {
@@ -233,6 +314,143 @@
       max-height: 360px;
     }
 
+    .gas-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .top-gas-locations {
+      list-style: none;
+      padding: 0;
+      margin: 8px 0 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .top-gas-locations li {
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .top-gas-locations li span {
+      color: var(--text-muted);
+      margin-left: 4px;
+      font-weight: 500;
+    }
+
+    .clickable-row {
+      cursor: pointer;
+    }
+
+    .order-modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    }
+
+    .order-modal.open {
+      display: flex;
+    }
+
+    .order-modal__backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+    }
+
+    .order-modal__dialog {
+      position: relative;
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-soft);
+      padding: 24px;
+      width: min(720px, calc(100% - 32px));
+      max-height: 90vh;
+      overflow-y: auto;
+      z-index: 1;
+    }
+
+    .order-modal__close {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.4rem;
+      cursor: pointer;
+    }
+
+    .order-modal__content {
+      margin-top: 8px;
+    }
+
+    .order-details-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .order-details-meta span.label {
+      display: block;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .order-details-meta span.value {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .order-details-section {
+      margin-bottom: 20px;
+    }
+
+    .order-details-section h4 {
+      margin: 0 0 8px;
+    }
+
+    .order-details-items table {
+      font-size: 0.85rem;
+    }
+
+    .charges-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+
+    .charges-list li {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+
+    .charges-list li:last-child {
+      border-bottom: none;
+      font-weight: 600;
+    }
+
     @media (max-width: 640px) {
       header {
         align-items: flex-start;
@@ -250,53 +468,109 @@
     <header>
       <div>
         <h1><span class="icon">🧾</span>Costco Receipt Dashboard</h1>
-        <p>Upload your Costco receipts JSON to see spending insights.</p>
-      </div>
-      <div>
-        <div class="uploader">
-          <label for="fileInput">Receipts JSON:</label>
-          <input id="fileInput" type="file" accept="application/json,.json" />
+        <p id="status" class="status">No receipts loaded yet.</p>
+        <div class="controls">
+          <label for="datePreset">Range:</label>
+          <select id="datePreset">
+            <option value="all">All Time</option>
+            <option value="ytd">Year to Date</option>
+            <option value="last12">Last 12 Months</option>
+            <option value="custom">Custom Range</option>
+          </select>
+          <label for="customStart">Start:</label>
+          <input type="date" id="customStart" />
+          <label for="customEnd">End:</label>
+          <input type="date" id="customEnd" />
+          <label for="monthSelect">Month:</label>
+          <select id="monthSelect">
+            <option value="all">All Months</option>
+          </select>
+          <button id="downloadJsonBtn" type="button">Download JSON</button>
         </div>
-        <div id="status" class="status">No file loaded yet.</div>
       </div>
     </header>
 
-    <!-- Summary cards -->
-    <section class="summary-grid">
-      <div class="summary-card">
-        <div class="label">Total Purchases (items)</div>
-        <div class="value" id="totalPurchases">–</div>
-        <div class="sub">Total individual items bought</div>
+    <div class="tabs">
+      <button class="tab-button active" data-tab="allTab">All</button>
+      <button class="tab-button" data-tab="warehouseTab">Warehouse</button>
+      <button class="tab-button" data-tab="onlineTab">Online</button>
+      <button class="tab-button" data-tab="gasTab">Gas</button>
+    </div>
+
+    <section class="summary-grid" id="summaryGrid"></section>
+    <p id="dataCoverage" class="status">No data yet.</p>
+    <div class="top-locations-card">
+      <h3>Top Locations</h3>
+      <ul id="globalTopLocations" class="top-gas-locations"></ul>
+    </div>
+
+    <section class="card">
+      <h2><span class="icon">📋</span>Shopping Trips</h2>
+      <div class="tab-content active" id="allTab">
+        <div class="table-scroll">
+          <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Channel</th>
+              <th>Location</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="allVisitsBody"></tbody>
+          </table>
+        </div>
       </div>
-      <div class="summary-card">
-        <div class="label">Unique Items</div>
-        <div class="value" id="uniqueItems">–</div>
-        <div class="sub">Distinct Costco item codes</div>
+      <div class="tab-content" id="warehouseTab">
+        <div class="table-scroll">
+          <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Warehouse</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="warehouseVisitsBody"></tbody>
+          </table>
+        </div>
       </div>
-      <div class="summary-card">
-        <div class="label">Receipts</div>
-        <div class="value" id="receiptCount">–</div>
-        <div class="sub">Number of shopping trips</div>
+      <div class="tab-content" id="onlineTab">
+        <div class="table-scroll">
+          <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Order #</th>
+              <th>Status</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="onlineOrdersBody"></tbody>
+          </table>
+        </div>
       </div>
-      <div class="summary-card">
-        <div class="label">Total Spent</div>
-        <div class="value" id="totalSpent">–</div>
-        <div class="sub">Including tax</div>
-      </div>
-      <div class="summary-card">
-        <div class="label">Avg Item Price</div>
-        <div class="value" id="avgItemPrice">–</div>
-        <div class="sub">Average price per purchased unit</div>
-      </div>
-      <div class="summary-card">
-        <div class="label">Avg Per Receipt</div>
-        <div class="value" id="avgPerReceipt">–</div>
-        <div class="sub">Average spend per trip</div>
+      <div class="tab-content" id="gasTab">
+        <div class="table-scroll">
+          <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Date</th>
+              <th>Location</th>
+              <th>Gallons</th>
+              <th>Price / Gal</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="gasTripsBody"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
     <!-- Top tables -->
-    <section class="grid-2">
+    <section class="grid-2" id="topItemsSection">
       <div class="card">
         <h2><span class="icon">💰</span>Most Total Spent Items</h2>
         <p class="subtitle">Items you've spent the most money on overall.</p>
@@ -382,481 +656,15 @@
       </div>
     </section>
   </div>
-
-  <script>
-    const currencyFormatter = new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-
-    function formatMoney(v) {
-      return currencyFormatter.format(v || 0);
-    }
-
-    function monthsBetween(d1, d2) {
-      const msPerMonth = 1000 * 60 * 60 * 24 * 30.4375;
-      return Math.abs(d2 - d1) / msPerMonth;
-    }
-
-    function processReceipts(receipts) {
-      const itemStats = new Map(); // key -> stats
-      const monthlyTotals = new Map(); // "YYYY-MM" -> total
-      let totalSpent = 0;
-      let sumItemAmounts = 0;
-      let totalUnits = 0;
-
-      receipts.forEach((receipt) => {
-        const total = Number(receipt.total) || 0;
-        totalSpent += total;
-
-        const monthKey = (receipt.transactionDate || "").slice(0, 7); // YYYY-MM
-        if (monthKey) {
-          monthlyTotals.set(
-            monthKey,
-            (monthlyTotals.get(monthKey) || 0) + total
-          );
-        }
-
-        const items = Array.isArray(receipt.itemArray)
-          ? receipt.itemArray
-          : [];
-        const dateStr =
-          receipt.transactionDateTime ||
-          (receipt.transactionDate
-            ? receipt.transactionDate + "T00:00:00"
-            : null);
-        const trxDate = dateStr ? new Date(dateStr) : new Date();
-
-        items.forEach((item) => {
-          const unit = Number(item.unit) || 0;
-          const amount = Number(item.amount) || 0;
-
-          // Skip coupons / negative adjustments / weird lines
-          if (!item.itemNumber || unit <= 0 || amount <= 0) return;
-
-          const key =
-            item.itemNumber + "|" + (item.itemDescription01 || "").trim();
-          const name = (item.itemDescription01 || "").trim();
-
-          const perUnitPrice = amount / unit;
-
-          let stat = itemStats.get(key);
-          if (!stat) {
-            stat = {
-              itemNumber: item.itemNumber,
-              name,
-              totalSpent: 0,
-              totalUnits: 0,
-              purchases: 0,
-              prices: [], // {date, price}
-            };
-            itemStats.set(key, stat);
-          }
-
-          stat.totalSpent += amount;
-          stat.totalUnits += unit;
-          stat.purchases += unit;
-          stat.prices.push({ date: trxDate, price: perUnitPrice });
-
-          sumItemAmounts += amount;
-          totalUnits += unit;
-        });
-      });
-
-      const receiptsCount = receipts.length;
-      const uniqueItems = itemStats.size;
-      const avgItemPrice =
-        totalUnits > 0 ? sumItemAmounts / totalUnits : 0;
-      const avgPerReceipt =
-        receiptsCount > 0 ? totalSpent / receiptsCount : 0;
-
-      return {
-        itemStats,
-        monthlyTotals,
-        summary: {
-          totalSpent,
-          totalUnits,
-          receiptsCount,
-          uniqueItems,
-          avgItemPrice,
-          avgPerReceipt,
-        },
-      };
-    }
-
-    function renderSummary(summary) {
-      document.getElementById("totalPurchases").textContent =
-        summary.totalUnits.toLocaleString();
-      document.getElementById("uniqueItems").textContent =
-        summary.uniqueItems.toLocaleString();
-      document.getElementById("receiptCount").textContent =
-        summary.receiptsCount.toLocaleString();
-      document.getElementById("totalSpent").textContent =
-        formatMoney(summary.totalSpent);
-      document.getElementById("avgItemPrice").textContent =
-        formatMoney(summary.avgItemPrice);
-      document.getElementById("avgPerReceipt").textContent =
-        formatMoney(summary.avgPerReceipt);
-    }
-
-    function renderMostTotalSpent(itemStats) {
-      const tbody = document.getElementById("mostTotalSpentBody");
-      tbody.innerHTML = "";
-
-      const rows = Array.from(itemStats.values())
-        .sort((a, b) => b.totalSpent - a.totalSpent)
-        .slice(0, 10);
-
-      rows.forEach((row, idx) => {
-        const tr = document.createElement("tr");
-
-        const rankTd = document.createElement("td");
-        rankTd.textContent = idx + 1;
-        tr.appendChild(rankTd);
-
-        const itemTd = document.createElement("td");
-        itemTd.innerHTML =
-          "<strong>" +
-          row.name +
-          "</strong><br/><span class='status'>#" +
-          row.itemNumber +
-          "</span>";
-        tr.appendChild(itemTd);
-
-        const totalTd = document.createElement("td");
-        totalTd.className = "money";
-        totalTd.textContent = formatMoney(row.totalSpent);
-        tr.appendChild(totalTd);
-
-        const timesTd = document.createElement("td");
-        timesTd.textContent = row.purchases + "×";
-        tr.appendChild(timesTd);
-
-        const avgTd = document.createElement("td");
-        avgTd.className = "money";
-        avgTd.textContent = formatMoney(
-          row.totalSpent / row.purchases
-        );
-        tr.appendChild(avgTd);
-
-        tbody.appendChild(tr);
-      });
-    }
-
-    function renderMostPurchased(itemStats) {
-      const tbody = document.getElementById("mostPurchasedBody");
-      tbody.innerHTML = "";
-
-      const rows = Array.from(itemStats.values())
-        .sort((a, b) => b.purchases - a.purchases)
-        .slice(0, 10);
-
-      rows.forEach((row, idx) => {
-        const tr = document.createElement("tr");
-
-        // Rank
-        const rankTd = document.createElement("td");
-        rankTd.textContent = idx + 1;
-        tr.appendChild(rankTd);
-
-        // Item info
-        const itemTd = document.createElement("td");
-        itemTd.innerHTML =
-          "<strong>" +
-          row.name +
-          "</strong><br/><span class='status'>#" +
-          row.itemNumber +
-          "</span>";
-        tr.appendChild(itemTd);
-
-        // Times bought
-        const timesTd = document.createElement("td");
-        timesTd.textContent = row.purchases + "×";
-        tr.appendChild(timesTd);
-
-        // Avg price
-        const avgTd = document.createElement("td");
-        avgTd.className = "money";
-        avgTd.textContent = formatMoney(row.totalSpent / row.purchases);
-        tr.appendChild(avgTd);
-
-        // Min → Max
-        let min = Infinity;
-        let max = -Infinity;
-        row.prices.forEach((p) => {
-          if (p.price < min) min = p.price;
-          if (p.price > max) max = p.price;
-        });
-
-        const minMaxTd = document.createElement("td");
-        minMaxTd.className = "money";
-        minMaxTd.innerHTML = `${formatMoney(min)} → ${formatMoney(max)}`;
-        tr.appendChild(minMaxTd);
-
-        // Increase %
-        const incPct =
-          min > 0 ? ((max - min) / min) * 100 : 0;
-
-        const pctTd = document.createElement("td");
-        pctTd.className = incPct > 0 ? "pos" : "status";
-        pctTd.textContent = incPct > 0 
-          ? "+" + incPct.toFixed(1) + "%"
-          : "0%";
-        tr.appendChild(pctTd);
-
-        tbody.appendChild(tr);
-      });
-    }
-
-    function renderMostExpensive(itemStats) {
-      const tbody = document.getElementById("mostExpensiveBody");
-      tbody.innerHTML = "";
-
-      const rows = Array.from(itemStats.values())
-        .filter((s) => s.purchases >= 3)
-        .map((s) => {
-          const avg = s.totalSpent / s.purchases;
-          const max = s.prices.reduce(
-            (m, p) => Math.max(m, p.price),
-            0
-          );
-          return { ...s, avgPrice: avg, maxPrice: max };
-        })
-        .sort((a, b) => b.avgPrice - a.avgPrice)
-        .slice(0, 10);
-
-      rows.forEach((row, idx) => {
-        const tr = document.createElement("tr");
-
-        const rankTd = document.createElement("td");
-        rankTd.textContent = idx + 1;
-        tr.appendChild(rankTd);
-
-        const itemTd = document.createElement("td");
-        itemTd.innerHTML =
-          "<strong>" +
-          row.name +
-          "</strong><br/><span class='status'>#" +
-          row.itemNumber +
-          "</span>";
-        tr.appendChild(itemTd);
-
-        const avgTd = document.createElement("td");
-        avgTd.className = "money";
-        avgTd.textContent = formatMoney(row.avgPrice);
-        tr.appendChild(avgTd);
-
-        const maxTd = document.createElement("td");
-        maxTd.className = "money";
-        maxTd.textContent = formatMoney(row.maxPrice);
-        tr.appendChild(maxTd);
-
-        const purchasesTd = document.createElement("td");
-        purchasesTd.textContent = row.purchases + "×";
-        tr.appendChild(purchasesTd);
-
-        tbody.appendChild(tr);
-      });
-    }
-
-    function renderPriceIncreases(itemStats) {
-      const tbody = document.getElementById("priceIncreaseBody");
-      tbody.innerHTML = "";
-
-      const rows = [];
-
-      itemStats.forEach((s) => {
-        if (s.prices.length < 2) return;
-
-        let minPrice = Infinity;
-        let maxPrice = -Infinity;
-        let minDate = null;
-        let maxDate = null;
-
-        s.prices.forEach((p) => {
-          if (p.price < minPrice) {
-            minPrice = p.price;
-            minDate = p.date;
-          }
-          if (p.price > maxPrice) {
-            maxPrice = p.price;
-            maxDate = p.date;
-          }
-        });
-
-        const increase = maxPrice - minPrice;
-        if (increase <= 0.01 || !minDate || !maxDate) return;
-
-        const months = monthsBetween(minDate, maxDate);
-        if (months < 0.01) return;
-        if (["155", "712309"].includes(String(s.itemNumber))) return;
-
-        rows.push({
-          name: s.name,
-          itemNumber: s.itemNumber,
-          minPrice,
-          maxPrice,
-          increase,
-          months,
-          ratePerMonth: increase / months,
-        });
-      });
-
-      rows
-        .sort((a, b) => b.increase - a.increase)
-        .slice(0, 10)
-        .forEach((row, idx) => {
-          const tr = document.createElement("tr");
-
-          const rankTd = document.createElement("td");
-          rankTd.textContent = idx + 1;
-          tr.appendChild(rankTd);
-
-          const itemTd = document.createElement("td");
-          itemTd.innerHTML =
-            "<strong>" +
-            row.name +
-            "</strong><br/><span class='status'>#" +
-            row.itemNumber +
-            "</span>";
-          tr.appendChild(itemTd);
-
-          const minMaxTd = document.createElement("td");
-          minMaxTd.className = "money";
-          minMaxTd.innerHTML =
-            formatMoney(row.minPrice) +
-            " → " +
-            formatMoney(row.maxPrice);
-          tr.appendChild(minMaxTd);
-
-          const incTd = document.createElement("td");
-          incTd.className = "money pos";
-          incTd.textContent =
-            "+" + formatMoney(row.increase);
-          tr.appendChild(incTd);
-
-          const periodTd = document.createElement("td");
-          periodTd.textContent =
-            row.months.toFixed(1) + " months";
-          tr.appendChild(periodTd);
-
-          const rateTd = document.createElement("td");
-          rateTd.className = "money pos";
-          rateTd.textContent =
-            "+" +
-            formatMoney(row.ratePerMonth) +
-            "/mo";
-          tr.appendChild(rateTd);
-
-          tbody.appendChild(tr);
-        });
-    }
-
-    let monthlyChart;
-
-    function renderMonthlyChart(monthlyTotals) {
-      const ctx = document
-        .getElementById("monthlyChart")
-        .getContext("2d");
-
-      const entries = Array.from(monthlyTotals.entries()).sort(
-        (a, b) => (a[0] < b[0] ? -1 : 1)
-      );
-      const labels = entries.map(([m]) => m);
-      const data = entries.map(([, v]) => v);
-
-      if (monthlyChart) {
-        monthlyChart.destroy();
-      }
-
-      monthlyChart = new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels,
-          datasets: [
-            {
-              label: "Amount Spent ($)",
-              data,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: {
-              beginAtZero: true,
-            },
-          },
-          plugins: {
-            legend: {
-              display: false,
-            },
-          },
-        },
-      });
-    }
-
-    function handleData(receipts) {
-      const { itemStats, monthlyTotals, summary } =
-        processReceipts(receipts);
-
-      renderSummary(summary);
-      renderMostTotalSpent(itemStats);
-      renderMostPurchased(itemStats);
-      renderMostExpensive(itemStats);
-      renderPriceIncreases(itemStats);
-      renderMonthlyChart(monthlyTotals);
-    }
-
-    // File input handler (standalone usage)
-    document
-      .getElementById("fileInput")
-      .addEventListener("change", (e) => {
-        const statusEl = document.getElementById("status");
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          try {
-            const json = JSON.parse(event.target.result);
-            if (!Array.isArray(json)) {
-              throw new Error(
-                "Expected the JSON to be an array of receipts."
-              );
-            }
-            statusEl.textContent = `Loaded ${json.length.toLocaleString()} receipts.`;
-            statusEl.classList.remove("error");
-            handleData(json);
-          } catch (err) {
-            console.error(err);
-            statusEl.textContent =
-              "Error reading file: " + err.message;
-            statusEl.classList.add("error");
-          }
-        };
-        reader.readAsText(file);
-      });
-
-    // --- Extension integration: auto-load receipts if opened from the extension ---
-    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-      const statusEl = document.getElementById("status");
-
-      chrome.runtime.sendMessage({ type: "getReceipts" }, (resp) => {
-        if (chrome.runtime.lastError) {
-          console.warn("No receipts from extension:", chrome.runtime.lastError);
-          return;
-        }
-        if (resp && Array.isArray(resp.receipts) && resp.receipts.length) {
-          statusEl.textContent = `Loaded ${resp.receipts.length.toLocaleString()} receipts from extension.`;
-          statusEl.classList.remove("error");
-          handleData(resp.receipts);
-        }
-      });
-    }
-  </script>
+  <div id="orderDetailsModal" class="order-modal" aria-hidden="true">
+    <div class="order-modal__backdrop"></div>
+    <div class="order-modal__dialog" role="dialog" aria-modal="true" aria-label="Order details">
+      <button id="orderDetailsClose" class="order-modal__close" aria-label="Close order details">&times;</button>
+      <div id="orderDetailsContent" class="order-modal__content">
+        <p class="status">Select an online order to view its details.</p>
+      </div>
+    </div>
+  </div>
+  <script src="dashboard.js" defer></script>
 </body>
 </html>

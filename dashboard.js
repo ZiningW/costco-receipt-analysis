@@ -1,0 +1,1776 @@
+const currencyFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+const dateFormatter = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric"
+});
+
+const statusEl = document.getElementById("status");
+const EXTENSION_STORAGE_KEY = "costcoReceiptsData";
+const hasChrome = typeof chrome !== "undefined";
+let storedReceipts = [];
+let storedOnlineOrders = [];
+const presetSelect = document.getElementById("datePreset");
+const customStartInput = document.getElementById("customStart");
+const customEndInput = document.getElementById("customEnd");
+const monthSelect = document.getElementById("monthSelect");
+const downloadJsonBtn = document.getElementById("downloadJsonBtn");
+const tabButtons = document.querySelectorAll(".tab-button");
+const tabContents = document.querySelectorAll(".tab-content");
+const topItemsSection = document.getElementById("topItemsSection");
+const allVisitsBody = document.getElementById("allVisitsBody");
+const warehouseVisitsBody = document.getElementById("warehouseVisitsBody");
+const onlineOrdersBody = document.getElementById("onlineOrdersBody");
+const gasTripsBody = document.getElementById("gasTripsBody");
+const orderDetailsModal = document.getElementById("orderDetailsModal");
+const orderDetailsContent = document.getElementById("orderDetailsContent");
+const orderDetailsCloseBtn = document.getElementById("orderDetailsClose");
+let activeTab = "all";
+let latestSummaryPayload = null;
+let storedOnlineOrderDetails = {};
+
+const filterState = {
+  preset: presetSelect ? presetSelect.value : "all",
+  customStart: null,
+  customEnd: null,
+  month: monthSelect ? monthSelect.value || "all" : "all"
+};
+
+if (presetSelect) {
+  presetSelect.addEventListener("change", (e) => {
+    filterState.preset = e.target.value || "all";
+    updateCustomInputsDisabled();
+    applyFilterAndRender();
+  });
+}
+
+if (customStartInput) {
+  customStartInput.addEventListener("change", (e) => {
+    filterState.customStart = e.target.value || null;
+    if (filterState.preset === "custom") {
+      applyFilterAndRender();
+    }
+  });
+}
+
+if (customEndInput) {
+  customEndInput.addEventListener("change", (e) => {
+    filterState.customEnd = e.target.value || null;
+    if (filterState.preset === "custom") {
+      applyFilterAndRender();
+    }
+  });
+}
+
+if (monthSelect) {
+  monthSelect.addEventListener("change", (e) => {
+    filterState.month = e.target.value || "all";
+    applyFilterAndRender();
+  });
+}
+
+if (downloadJsonBtn) {
+  downloadJsonBtn.addEventListener("click", () => {
+    const filteredReceipts = filterReceipts(storedReceipts);
+    const filteredOnline = filterOnlineOrders(storedOnlineOrders);
+    const blob = new Blob(
+      [JSON.stringify({ receipts: filteredReceipts, onlineOrders: filteredOnline }, null, 2)],
+      {
+      type: "application/json"
+    });
+    const link = document.createElement("a");
+    const suffixParts = [filterState.preset];
+    if (filterState.preset === "custom") {
+      suffixParts.push(`${filterState.customStart || "start"}-${filterState.customEnd || "end"}`);
+    }
+    if (filterState.month && filterState.month !== "all") {
+      suffixParts.push(`month-${filterState.month}`);
+    }
+    const suffix = suffixParts.filter(Boolean).join("_");
+    link.download = `costco-receipts-${suffix || "all"}.json`;
+    link.href = URL.createObjectURL(blob);
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(link.href);
+      document.body.removeChild(link);
+    }, 0);
+  });
+}
+updateCustomInputsDisabled();
+
+const tabModeMap = {
+  allTab: "all",
+  warehouseTab: "warehouse",
+  onlineTab: "online",
+  gasTab: "gas"
+};
+
+tabButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const targetId = button.getAttribute("data-tab");
+    tabButtons.forEach((btn) => btn.classList.toggle("active", btn === button));
+    tabContents.forEach((content) => {
+      content.classList.toggle("active", content.id === targetId);
+    });
+    activeTab = tabModeMap[targetId] || "all";
+    if (latestSummaryPayload) {
+      renderSummary(
+        latestSummaryPayload.summary,
+        latestSummaryPayload.onlineData,
+        latestSummaryPayload.gasStats,
+        latestSummaryPayload.warehouseVisits
+      );
+      renderTopItemSections(
+        latestSummaryPayload.itemStats,
+        latestSummaryPayload.onlineData
+      );
+      renderAllVisits(
+        latestSummaryPayload.warehouseVisits,
+        latestSummaryPayload.onlineData.rows,
+        latestSummaryPayload.gasStats.trips
+      );
+    }
+  });
+});
+
+if (onlineOrdersBody) {
+  onlineOrdersBody.addEventListener("click", handleOrderRowInteraction);
+}
+
+if (allVisitsBody) {
+  allVisitsBody.addEventListener("click", handleOrderRowInteraction);
+}
+
+if (orderDetailsCloseBtn) {
+  orderDetailsCloseBtn.addEventListener("click", closeOrderDetailsModal);
+}
+
+if (orderDetailsModal) {
+  orderDetailsModal.addEventListener("click", (event) => {
+    if (event.target === orderDetailsModal || event.target.classList.contains("order-modal__backdrop")) {
+      closeOrderDetailsModal();
+    }
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && orderDetailsModal?.classList.contains("open")) {
+    closeOrderDetailsModal();
+  }
+});
+
+function formatMoney(value) {
+  return currencyFormatter.format(value || 0);
+}
+
+function formatGallons(value) {
+  const gallons = Number(value) || 0;
+  return gallons.toFixed(2);
+}
+
+const GAS_KEYWORDS = ["gasoline", "gas ", "gas-", "gas/", "unleaded", "premium", "diesel", "fuel"];
+
+function isGasItem(item) {
+  if (!item) return false;
+  const desc = (
+    (item.itemDescription01 || "") +
+    " " +
+    (item.itemDescription02 || "")
+  ).toLowerCase();
+  return GAS_KEYWORDS.some((keyword) => desc.includes(keyword));
+}
+
+function parseReceiptDate(receipt) {
+  if (!receipt) return null;
+  const raw =
+    receipt.transactionDateTime ||
+    (receipt.transactionDate ? `${receipt.transactionDate}T00:00:00` : null);
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.valueOf()) ? null : parsed;
+}
+
+function formatReceiptDate(receipt) {
+  const parsed = parseReceiptDate(receipt);
+  return parsed ? dateFormatter.format(parsed) : "—";
+}
+
+function buildLocationMapFromVisits(visits) {
+  const map = new Map();
+  if (!Array.isArray(visits)) return map;
+  visits.forEach((visit) => {
+    const key = visit.location || "Unknown";
+    map.set(key, (map.get(key) || 0) + 1);
+  });
+  return map;
+}
+
+function parseOnlineOrderDate(order) {
+  if (!order) return null;
+  const raw = order.orderPlacedDate || order.orderedDate || order.orderPlaced;
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.valueOf()) ? null : parsed;
+}
+
+function formatInputDate(date) {
+  return date ? date.toISOString().slice(0, 10) : "";
+}
+
+function getCombinedBounds(receipts, onlineOrders) {
+  let start = null;
+  let end = null;
+  const consider = (date) => {
+    if (!date) return;
+    if (!start || date < start) start = date;
+    if (!end || date > end) end = date;
+  };
+  if (Array.isArray(receipts)) {
+    receipts.forEach((receipt) => consider(parseReceiptDate(receipt)));
+  }
+  if (Array.isArray(onlineOrders)) {
+    onlineOrders.forEach((order) => consider(parseOnlineOrderDate(order)));
+  }
+  return { start, end };
+}
+
+function updateCustomInputsDisabled() {
+  const isCustom = filterState.preset === "custom";
+  if (customStartInput) customStartInput.disabled = !isCustom;
+  if (customEndInput) customEndInput.disabled = !isCustom;
+}
+
+function updateCustomDateInputs(bounds) {
+  if (!customStartInput || !customEndInput) return;
+  if (bounds) {
+    if (bounds.start) {
+      filterState.customStart = filterState.customStart || formatInputDate(bounds.start);
+    }
+    if (bounds.end) {
+      filterState.customEnd = filterState.customEnd || formatInputDate(bounds.end);
+    }
+  }
+  customStartInput.value = filterState.customStart || "";
+  customEndInput.value = filterState.customEnd || "";
+}
+
+function populateMonthOptions(receipts, onlineOrders) {
+  if (!monthSelect) return;
+  const previous = filterState.month;
+  const monthMap = new Map();
+  const addMonth = (date) => {
+    if (!date) return;
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    if (!monthMap.has(key)) {
+      monthMap.set(
+        key,
+        date.toLocaleString("default", { month: "long", year: "numeric" })
+      );
+    }
+  };
+  if (Array.isArray(receipts)) {
+    receipts.forEach((receipt) => addMonth(parseReceiptDate(receipt)));
+  }
+  if (Array.isArray(onlineOrders)) {
+    onlineOrders.forEach((order) => addMonth(parseOnlineOrderDate(order)));
+  }
+  const sortedKeys = Array.from(monthMap.keys()).sort((a, b) => b.localeCompare(a));
+  monthSelect.innerHTML = "";
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "all";
+  defaultOption.textContent = "All Months";
+  monthSelect.appendChild(defaultOption);
+  sortedKeys.forEach((key) => {
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = monthMap.get(key);
+    monthSelect.appendChild(option);
+  });
+  if (sortedKeys.includes(previous)) {
+    monthSelect.value = previous;
+    filterState.month = previous;
+  } else {
+    monthSelect.value = "all";
+    filterState.month = "all";
+  }
+}
+
+function filterReceipts(receipts) {
+  if (!Array.isArray(receipts)) return [];
+  let filtered = receipts.slice();
+  const now = new Date();
+
+  if (filterState.preset === "ytd") {
+    const start = new Date(now.getFullYear(), 0, 1);
+    filtered = filtered.filter((receipt) => {
+      const date = parseReceiptDate(receipt);
+      if (!date) return true;
+      return date >= start;
+    });
+  } else if (filterState.preset === "last12") {
+    const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+    filtered = filtered.filter((receipt) => {
+      const date = parseReceiptDate(receipt);
+      if (!date) return true;
+      return date >= start;
+    });
+  } else if (filterState.preset === "custom") {
+    let startValue = filterState.customStart ? new Date(filterState.customStart) : null;
+    let endValue = filterState.customEnd ? new Date(filterState.customEnd) : null;
+    if (startValue && Number.isNaN(startValue.valueOf())) startValue = null;
+    if (endValue && Number.isNaN(endValue.valueOf())) endValue = null;
+    filtered = filtered.filter((receipt) => {
+      const date = parseReceiptDate(receipt);
+      if (!date) return true;
+      if (startValue && date < startValue) return false;
+      if (endValue) {
+        const endDay = new Date(endValue);
+        endDay.setHours(23, 59, 59, 999);
+        if (date > endDay) return false;
+      }
+      return true;
+    });
+  }
+
+  if (filterState.month && filterState.month !== "all") {
+    const [yearStr, monthStr] = filterState.month.split("-");
+    const targetYear = Number(yearStr);
+    const targetMonth = Number(monthStr) - 1;
+    filtered = filtered.filter((receipt) => {
+      const date = parseReceiptDate(receipt);
+      if (!date || Number.isNaN(targetYear) || Number.isNaN(targetMonth)) return false;
+      return date.getFullYear() === targetYear && date.getMonth() === targetMonth;
+    });
+  }
+
+  return filtered;
+}
+
+function filterOnlineOrders(orders) {
+  if (!Array.isArray(orders)) return [];
+  let filtered = orders.slice();
+  const now = new Date();
+
+  if (filterState.preset === "ytd") {
+    const start = new Date(now.getFullYear(), 0, 1);
+    filtered = filtered.filter((order) => {
+      const date = parseOnlineOrderDate(order);
+      if (!date) return true;
+      return date >= start;
+    });
+  } else if (filterState.preset === "last12") {
+    const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+    filtered = filtered.filter((order) => {
+      const date = parseOnlineOrderDate(order);
+      if (!date) return true;
+      return date >= start;
+    });
+  } else if (filterState.preset === "custom") {
+    let startValue = filterState.customStart ? new Date(filterState.customStart) : null;
+    let endValue = filterState.customEnd ? new Date(filterState.customEnd) : null;
+    if (startValue && Number.isNaN(startValue.valueOf())) startValue = null;
+    if (endValue && Number.isNaN(endValue.valueOf())) endValue = null;
+    filtered = filtered.filter((order) => {
+      const date = parseOnlineOrderDate(order);
+      if (!date) return true;
+      if (startValue && date < startValue) return false;
+      if (endValue) {
+        const endDay = new Date(endValue);
+        endDay.setHours(23, 59, 59, 999);
+        if (date > endDay) return false;
+      }
+      return true;
+    });
+  }
+
+  if (filterState.month && filterState.month !== "all") {
+    const [yearStr, monthStr] = filterState.month.split("-");
+    const targetYear = Number(yearStr);
+    const targetMonth = Number(monthStr) - 1;
+    filtered = filtered.filter((order) => {
+      const date = parseOnlineOrderDate(order);
+      if (!date || Number.isNaN(targetYear) || Number.isNaN(targetMonth)) return false;
+      return date.getFullYear() === targetYear && date.getMonth() === targetMonth;
+    });
+  }
+
+  return filtered;
+}
+function monthsBetween(d1, d2) {
+  const msPerMonth = 1000 * 60 * 60 * 24 * 30.4375;
+  return Math.abs(d2 - d1) / msPerMonth;
+}
+
+function processReceipts(receipts) {
+  const itemStats = new Map();
+  const monthlyTotals = new Map();
+  const gasStats = {
+    trips: [],
+    totalTrips: 0,
+    totalGallons: 0,
+    totalCost: 0,
+    locationCounts: new Map(),
+    dateRange: { start: null, end: null }
+  };
+  const dateRange = { start: null, end: null };
+  const warehouseVisits = [];
+  let totalSpent = 0;
+  let sumItemAmounts = 0;
+  let totalUnits = 0;
+  let shoppingReceipts = 0;
+  let gasOnlyReceipts = 0;
+
+  receipts.forEach((receipt) => {
+    const total = Number(receipt.total) || 0;
+    const parsedDate = parseReceiptDate(receipt);
+    if (parsedDate) {
+      if (!dateRange.start || parsedDate < dateRange.start) {
+        dateRange.start = parsedDate;
+      }
+      if (!dateRange.end || parsedDate > dateRange.end) {
+        dateRange.end = parsedDate;
+      }
+    }
+
+    const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
+    const gasItems = [];
+    const dateStr =
+      receipt.transactionDateTime ||
+      (receipt.transactionDate ? `${receipt.transactionDate}T00:00:00` : null);
+    const trxDate = dateStr ? new Date(dateStr) : new Date();
+
+    items.forEach((item) => {
+      const unit = Number(item.unit) || 0;
+      const amount = Number(item.amount) || 0;
+
+      if (!item.itemNumber || unit <= 0 || amount <= 0) return;
+
+      const isGas = isGasItem(item);
+      if (!isGas) {
+        const key = `${item.itemNumber}|${(item.itemDescription01 || "").trim()}`;
+        const name = (item.itemDescription01 || "").trim();
+        const perUnitPrice = amount / unit;
+
+        let stat = itemStats.get(key);
+        if (!stat) {
+          stat = {
+            itemNumber: item.itemNumber,
+            name,
+            totalSpent: 0,
+            totalUnits: 0,
+            purchases: 0,
+            prices: []
+          };
+          itemStats.set(key, stat);
+        }
+
+        stat.totalSpent += amount;
+        stat.totalUnits += unit;
+        stat.purchases += unit;
+        stat.prices.push({ date: trxDate, price: perUnitPrice });
+        sumItemAmounts += amount;
+        totalUnits += unit;
+      }
+
+      if (isGas) {
+        gasItems.push(item);
+        const location =
+          receipt.warehouseName ||
+          receipt.warehouseShortName ||
+          "Costco Gas";
+        const tripDate = parseReceiptDate(receipt);
+        const gallons = Number(
+          item.fuelUnitQuantity != null ? item.fuelUnitQuantity : unit
+        ) || 0;
+        const totalPrice = Number(amount) || 0;
+        let pricePerGallon = Number(item.itemUnitPriceAmount);
+        if (!pricePerGallon && gallons > 0) {
+          pricePerGallon = totalPrice / gallons;
+        }
+        if (gallons > 0 && totalPrice > 0) {
+          gasStats.trips.push({
+            date: tripDate,
+            location,
+            gallons,
+            totalPrice,
+            pricePerGallon,
+            transactionNumber: receipt.transactionNumber || receipt.transactionBarcode || ""
+          });
+          gasStats.totalTrips += 1;
+          gasStats.totalGallons += gallons;
+          gasStats.totalCost += totalPrice;
+          gasStats.locationCounts.set(
+            location,
+            (gasStats.locationCounts.get(location) || 0) + 1
+          );
+          if (tripDate) {
+            if (!gasStats.dateRange.start || tripDate < gasStats.dateRange.start) {
+              gasStats.dateRange.start = tripDate;
+            }
+            if (!gasStats.dateRange.end || tripDate > gasStats.dateRange.end) {
+              gasStats.dateRange.end = tripDate;
+            }
+          }
+        }
+      }
+    });
+
+    if (gasItems.length && gasItems.length === items.length) {
+      gasOnlyReceipts += 1;
+    } else {
+      shoppingReceipts += 1;
+      totalSpent += total;
+      warehouseVisits.push({
+        date: parsedDate,
+        location:
+          receipt.warehouseName ||
+          receipt.warehouseShortName ||
+          receipt.warehouseCity ||
+          `Warehouse #${receipt.warehouseNumber || "–"}`,
+        total
+      });
+      items.forEach((item) => {
+        if (isGasItem(item)) return;
+        sumItemAmounts += Number(item.amount) || 0;
+        totalUnits += Number(item.unit) || 0;
+      });
+
+      const monthKey = (receipt.transactionDate || "").slice(0, 7);
+      if (monthKey) {
+        monthlyTotals.set(
+          monthKey,
+          (monthlyTotals.get(monthKey) || 0) + total
+        );
+      }
+    }
+  });
+
+  const receiptsCount = receipts.length;
+  const uniqueItems = itemStats.size;
+  const avgItemPrice = totalUnits > 0 ? sumItemAmounts / totalUnits : 0;
+  const avgPerReceipt = shoppingReceipts > 0 ? totalSpent / shoppingReceipts : 0;
+
+  return {
+    itemStats,
+    monthlyTotals,
+    gasStats,
+    warehouseVisits,
+    summary: {
+      totalSpent,
+      totalUnits,
+      receiptsCount,
+      shoppingReceipts,
+      gasOnlyReceipts,
+      uniqueItems,
+      avgItemPrice,
+      avgPerReceipt,
+      gasStatsTotal: gasStats.totalCost,
+      dateRange: {
+        start: dateRange.start ? dateFormatter.format(dateRange.start) : null,
+        end: dateRange.end ? dateFormatter.format(dateRange.end) : null
+      }
+    }
+  };
+}
+
+function processOnlineOrders(orders) {
+  const rows = [];
+  let totalSpent = 0;
+  let totalItems = 0;
+  const uniqueItems = new Set();
+  const locationCounts = new Map();
+
+  if (Array.isArray(orders)) {
+    orders.forEach((order) => {
+      const total = Number(order.orderTotal) || 0;
+      totalSpent += total;
+      const location =
+        order.warehouseNumber != null
+          ? `Warehouse #${order.warehouseNumber}`
+          : "Online";
+      locationCounts.set(location, (locationCounts.get(location) || 0) + 1);
+
+      const itemList = Array.isArray(order.orderLineItems)
+        ? order.orderLineItems
+        : [];
+      totalItems += itemList.length;
+      itemList.forEach((item) => {
+        if (item.itemNumber) {
+          uniqueItems.add(item.itemNumber);
+        } else if (item.itemId) {
+          uniqueItems.add(item.itemId);
+        }
+      });
+
+      rows.push({
+        date: parseOnlineOrderDate(order),
+        orderNumber:
+          order.orderNumber ||
+          order.sourceOrderNumber ||
+          order.orderHeaderId ||
+          "—",
+        status: order.status || "",
+        total,
+        location
+      });
+    });
+  }
+
+  const dateStart = earliestDate(rows.map((r) => r.date));
+  const dateEnd = latestDate(rows.map((r) => r.date));
+
+  return {
+    totalOrders: rows.length,
+    totalSpent,
+    totalItems,
+    uniqueItems: uniqueItems.size,
+    locationCounts,
+    dateRangeText: {
+      start: dateStart ? dateFormatter.format(dateStart) : null,
+      end: dateEnd ? dateFormatter.format(dateEnd) : null
+    },
+    rows
+  };
+}
+
+function renderSummary(summary, onlineData, gasStats, warehouseVisits) {
+  latestSummaryPayload = { summary, onlineData, gasStats, warehouseVisits, itemStats: latestSummaryPayload?.itemStats };
+  const summaryGrid = document.getElementById("summaryGrid");
+  const topLocationsEl = document.getElementById("globalTopLocations");
+  const coverageEl = document.getElementById("dataCoverage");
+  if (!summaryGrid || !topLocationsEl) {
+    return;
+  }
+
+  summaryGrid.innerHTML = "";
+
+  const warehouseLocationMap = buildLocationMapFromVisits(warehouseVisits);
+  const onlineLocationMap = onlineData.locationCounts || new Map();
+  const gasLocationMap = gasStats?.locationCounts || new Map();
+
+  const { cards, locations, coverage } = buildSummaryCards(
+    activeTab,
+    summary,
+    onlineData,
+    gasStats,
+    warehouseLocationMap,
+    onlineLocationMap,
+    gasLocationMap
+  );
+
+  cards.forEach(({ label, value }) => {
+    const card = document.createElement("div");
+    card.className = "summary-card";
+    const labelEl = document.createElement("div");
+    labelEl.className = "label";
+    labelEl.textContent = label;
+    const valueEl = document.createElement("div");
+    valueEl.className = "value";
+    valueEl.textContent = value;
+    card.appendChild(labelEl);
+    card.appendChild(valueEl);
+    summaryGrid.appendChild(card);
+  });
+
+  renderTopLocationsPills(locations, activeTab === "online");
+  if (coverageEl) {
+    coverageEl.textContent = coverage || "";
+  }
+
+}
+
+function buildSummaryCards(
+  tab,
+  summary,
+  onlineData,
+  gasStats,
+  warehouseLocations,
+  onlineLocations,
+  gasLocations
+) {
+  let cards = [];
+  let locations = new Map();
+  let coverage = "";
+
+  if (tab === "warehouse") {
+    cards = [
+      { label: "Trips", value: summary.shoppingReceipts.toLocaleString() },
+      { label: "Total Spent", value: formatMoney(summary.totalSpent) },
+      { label: "Total Items", value: summary.totalUnits.toLocaleString() },
+      { label: "Unique Items", value: summary.uniqueItems.toLocaleString() },
+      { label: "Avg Item Price", value: formatMoney(summary.avgItemPrice) },
+      { label: "Avg Per Receipt", value: formatMoney(summary.avgPerReceipt) }
+    ];
+    locations = warehouseLocations;
+    coverage = buildCoverageText(
+      summary.dateRange?.start,
+      summary.dateRange?.end
+    );
+  } else if (tab === "online") {
+    const totalItems = onlineData.totalItems || 0;
+    const uniqueItems = onlineData.uniqueItems || 0;
+    const avgItemPrice =
+      totalItems > 0 ? formatMoney(onlineData.totalSpent / totalItems) : formatMoney(0);
+    const avgPerOrder =
+      onlineData.totalOrders > 0
+        ? formatMoney(onlineData.totalSpent / onlineData.totalOrders)
+        : formatMoney(0);
+    cards = [
+      { label: "Orders", value: onlineData.totalOrders.toLocaleString() },
+      { label: "Total Spent", value: formatMoney(onlineData.totalSpent) },
+      { label: "Total Items", value: totalItems.toLocaleString() },
+      { label: "Unique Items", value: uniqueItems.toLocaleString() },
+      { label: "Avg Item Price", value: avgItemPrice },
+      { label: "Avg Per Receipt", value: avgPerOrder }
+    ];
+    locations = onlineLocations;
+    coverage = buildCoverageText(
+      onlineData.dateRangeText?.start,
+      onlineData.dateRangeText?.end
+    );
+  } else if (tab === "gas") {
+    const avgPrice =
+      gasStats.totalGallons > 0 ? gasStats.totalCost / gasStats.totalGallons : 0;
+    cards = [
+      { label: "Fill-ups", value: gasStats.totalTrips.toLocaleString() },
+      { label: "Total Gallons", value: formatGallons(gasStats.totalGallons) },
+      { label: "Total Cost", value: formatMoney(gasStats.totalCost) },
+      { label: "Avg Price / Gallon", value: formatMoney(avgPrice) }
+    ];
+    locations = gasLocations;
+    coverage = buildCoverageText(
+      gasStats?.dateRange?.start ? dateFormatter.format(gasStats.dateRange.start) : null,
+      gasStats?.dateRange?.end ? dateFormatter.format(gasStats.dateRange.end) : null
+    );
+  } else {
+    const totalTrips =
+      summary.shoppingReceipts + gasStats.totalTrips + onlineData.totalOrders;
+    const totalSpentAll =
+      summary.totalSpent + gasStats.totalCost + onlineData.totalSpent;
+    const avgPerTrip = totalTrips > 0 ? totalSpentAll / totalTrips : 0;
+    cards = [
+      { label: "Trips", value: totalTrips.toLocaleString() },
+      { label: "Total Spent", value: formatMoney(totalSpentAll) },
+      { label: "Average per Trip", value: formatMoney(avgPerTrip) }
+    ];
+    locations = mergeLocationMaps([
+      warehouseLocations,
+      onlineLocations,
+      gasLocations
+    ]);
+    const allStart = earliestDate([
+      summary.dateRange?.start ? new Date(summary.dateRange.start) : null,
+      onlineData.dateRange?.start,
+      gasStats?.dateRange?.start
+    ]);
+    const allEnd = latestDate([
+      summary.dateRange?.end ? new Date(summary.dateRange.end) : null,
+      onlineData.dateRange?.end,
+      gasStats?.dateRange?.end
+    ]);
+    coverage = buildCoverageText(
+      allStart ? dateFormatter.format(allStart) : null,
+      allEnd ? dateFormatter.format(allEnd) : null
+    );
+  }
+
+  return { cards, locations, coverage };
+}
+
+function mergeLocationMaps(maps) {
+  const combined = new Map();
+  maps.forEach((map) => {
+    if (!map) return;
+    Array.from(map.entries()).forEach(([key, value]) => {
+      combined.set(key, (combined.get(key) || 0) + value);
+    });
+  });
+  return combined;
+}
+
+function renderTopLocationsPills(map, hidden) {
+  const container = document.getElementById("globalTopLocations");
+  if (!container) return;
+  container.innerHTML = "";
+  container.parentElement.style.display = hidden ? "none" : "block";
+  if (hidden) return;
+  const entries = map ? Array.from(map.entries()) : [];
+  if (!entries.length) {
+    const li = document.createElement("li");
+    li.textContent = "No locations yet.";
+    container.appendChild(li);
+    return;
+  }
+  entries
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .forEach(([name, count]) => {
+      const li = document.createElement("li");
+      li.innerHTML = `${name}<span>${count}×</span>`;
+      container.appendChild(li);
+    });
+}
+
+function earliestDate(dates) {
+  const filtered = dates.filter(
+    (d) => d instanceof Date && !Number.isNaN(d.valueOf())
+  );
+  if (!filtered.length) return null;
+  return filtered.sort((a, b) => a - b)[0];
+}
+
+function latestDate(dates) {
+  const filtered = dates.filter(
+    (d) => d instanceof Date && !Number.isNaN(d.valueOf())
+  );
+  if (!filtered.length) return null;
+  return filtered.sort((a, b) => b - a)[0];
+}
+
+function buildCoverageText(start, end) {
+  if (!start || !end) return "Date coverage unavailable.";
+  return `Showing ${start} → ${end}`;
+}
+
+function renderMostTotalSpent(itemStats) {
+  const tbody = document.getElementById("mostTotalSpentBody");
+  tbody.innerHTML = "";
+
+  const rows = Array.from(itemStats.values())
+    .sort((a, b) => b.totalSpent - a.totalSpent)
+    .slice(0, 10);
+
+  rows.forEach((row, idx) => {
+    const tr = document.createElement("tr");
+
+    const rankTd = document.createElement("td");
+    rankTd.textContent = idx + 1;
+    tr.appendChild(rankTd);
+
+    const itemTd = document.createElement("td");
+    itemTd.innerHTML =
+      `<strong>${row.name}</strong><br/><span class="status">#${row.itemNumber}</span>`;
+    tr.appendChild(itemTd);
+
+    const totalTd = document.createElement("td");
+    totalTd.className = "money";
+    totalTd.textContent = formatMoney(row.totalSpent);
+    tr.appendChild(totalTd);
+
+    const timesTd = document.createElement("td");
+    timesTd.textContent = `${row.purchases}×`;
+    tr.appendChild(timesTd);
+
+    const avgTd = document.createElement("td");
+    avgTd.className = "money";
+    avgTd.textContent = formatMoney(row.totalSpent / row.purchases);
+    tr.appendChild(avgTd);
+
+    tbody.appendChild(tr);
+  });
+}
+
+function renderMostPurchased(itemStats) {
+  const tbody = document.getElementById("mostPurchasedBody");
+  tbody.innerHTML = "";
+
+  const rows = Array.from(itemStats.values())
+    .sort((a, b) => b.purchases - a.purchases)
+    .slice(0, 10);
+
+  rows.forEach((row, idx) => {
+    const tr = document.createElement("tr");
+
+    const rankTd = document.createElement("td");
+    rankTd.textContent = idx + 1;
+    tr.appendChild(rankTd);
+
+    const itemTd = document.createElement("td");
+    itemTd.innerHTML =
+      `<strong>${row.name}</strong><br/><span class="status">#${row.itemNumber}</span>`;
+    tr.appendChild(itemTd);
+
+    const timesTd = document.createElement("td");
+    timesTd.textContent = `${row.purchases}×`;
+    tr.appendChild(timesTd);
+
+    const avgTd = document.createElement("td");
+    avgTd.className = "money";
+    avgTd.textContent = formatMoney(row.totalSpent / row.purchases);
+    tr.appendChild(avgTd);
+
+    let min = Infinity;
+    let max = -Infinity;
+    row.prices.forEach((p) => {
+      if (p.price < min) min = p.price;
+      if (p.price > max) max = p.price;
+    });
+
+    const minMaxTd = document.createElement("td");
+    minMaxTd.className = "money";
+    minMaxTd.innerHTML = `${formatMoney(min)} → ${formatMoney(max)}`;
+    tr.appendChild(minMaxTd);
+
+    const incPct = min > 0 ? ((max - min) / min) * 100 : 0;
+    const pctTd = document.createElement("td");
+    pctTd.className = incPct > 0 ? "pos" : "status";
+    pctTd.textContent = incPct > 0 ? `+${incPct.toFixed(1)}%` : "0%";
+    tr.appendChild(pctTd);
+
+    tbody.appendChild(tr);
+  });
+}
+
+function renderMostExpensive(itemStats) {
+  const tbody = document.getElementById("mostExpensiveBody");
+  tbody.innerHTML = "";
+
+  const rows = Array.from(itemStats.values())
+    .filter((s) => s.purchases >= 3)
+    .map((s) => {
+      const avg = s.totalSpent / s.purchases;
+      const max = s.prices.reduce((m, p) => Math.max(m, p.price), 0);
+      return { ...s, avgPrice: avg, maxPrice: max };
+    })
+    .sort((a, b) => b.avgPrice - a.avgPrice)
+    .slice(0, 10);
+
+  rows.forEach((row, idx) => {
+    const tr = document.createElement("tr");
+
+    const rankTd = document.createElement("td");
+    rankTd.textContent = idx + 1;
+    tr.appendChild(rankTd);
+
+    const itemTd = document.createElement("td");
+    itemTd.innerHTML =
+      `<strong>${row.name}</strong><br/><span class="status">#${row.itemNumber}</span>`;
+    tr.appendChild(itemTd);
+
+    const avgTd = document.createElement("td");
+    avgTd.className = "money";
+    avgTd.textContent = formatMoney(row.avgPrice);
+    tr.appendChild(avgTd);
+
+    const maxTd = document.createElement("td");
+    maxTd.className = "money";
+    maxTd.textContent = formatMoney(row.maxPrice);
+    tr.appendChild(maxTd);
+
+    const purchasesTd = document.createElement("td");
+    purchasesTd.textContent = `${row.purchases}×`;
+    tr.appendChild(purchasesTd);
+
+    tbody.appendChild(tr);
+  });
+}
+
+function renderPriceIncreases(itemStats) {
+  const tbody = document.getElementById("priceIncreaseBody");
+  tbody.innerHTML = "";
+
+  const rows = [];
+
+  itemStats.forEach((s) => {
+    if (s.prices.length < 2) return;
+
+    let minPrice = Infinity;
+    let maxPrice = -Infinity;
+    let minDate = null;
+    let maxDate = null;
+
+    s.prices.forEach((p) => {
+      if (p.price < minPrice) {
+        minPrice = p.price;
+        minDate = p.date;
+      }
+      if (p.price > maxPrice) {
+        maxPrice = p.price;
+        maxDate = p.date;
+      }
+    });
+
+    const increase = maxPrice - minPrice;
+    if (increase <= 0.01 || !minDate || !maxDate) return;
+
+    const months = monthsBetween(minDate, maxDate);
+    if (months < 0.01) return;
+    if (["155", "712309"].includes(String(s.itemNumber))) return;
+
+    rows.push({
+      name: s.name,
+      itemNumber: s.itemNumber,
+      minPrice,
+      maxPrice,
+      increase,
+      months,
+      ratePerMonth: increase / months
+    });
+  });
+
+  rows
+    .sort((a, b) => b.increase - a.increase)
+    .slice(0, 10)
+    .forEach((row, idx) => {
+      const tr = document.createElement("tr");
+
+      const rankTd = document.createElement("td");
+      rankTd.textContent = idx + 1;
+      tr.appendChild(rankTd);
+
+      const itemTd = document.createElement("td");
+      itemTd.innerHTML =
+        `<strong>${row.name}</strong><br/><span class="status">#${row.itemNumber}</span>`;
+      tr.appendChild(itemTd);
+
+      const minMaxTd = document.createElement("td");
+      minMaxTd.className = "money";
+      minMaxTd.innerHTML =
+        `${formatMoney(row.minPrice)} → ${formatMoney(row.maxPrice)}`;
+      tr.appendChild(minMaxTd);
+
+      const incTd = document.createElement("td");
+      incTd.className = "money pos";
+      incTd.textContent = `+${formatMoney(row.increase)}`;
+      tr.appendChild(incTd);
+
+      const periodTd = document.createElement("td");
+      periodTd.textContent = `${row.months.toFixed(1)} months`;
+      tr.appendChild(periodTd);
+
+      const rateTd = document.createElement("td");
+      rateTd.className = "money pos";
+      rateTd.textContent = `+${formatMoney(row.ratePerMonth)}/mo`;
+      tr.appendChild(rateTd);
+
+      tbody.appendChild(tr);
+    });
+}
+
+function renderGasSummary(gasStats) {
+  const trips = gasStats?.totalTrips || 0;
+  const gallons = gasStats?.totalGallons || 0;
+  const cost = gasStats?.totalCost || 0;
+  const avg = gallons > 0 ? cost / gallons : 0;
+
+  // No longer rendering dedicated gas summary card; gas stats displayed via
+  // summary cards based on the active tab.
+}
+
+function renderGasTrips(gasStats) {
+  if (!gasTripsBody) return;
+  gasTripsBody.innerHTML = "";
+
+  const trips = gasStats?.trips || [];
+  if (!trips.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    td.className = "status";
+    td.textContent = "No gas trips yet.";
+    tr.appendChild(td);
+    gasTripsBody.appendChild(tr);
+    return;
+  }
+
+  trips
+    .slice()
+    .sort((a, b) => {
+      const dateA = a.date || new Date(0);
+      const dateB = b.date || new Date(0);
+      return dateB - dateA;
+    })
+    .forEach((trip, idx) => {
+      const tr = document.createElement("tr");
+
+      const rankTd = document.createElement("td");
+      rankTd.textContent = idx + 1;
+      tr.appendChild(rankTd);
+
+      const dateTd = document.createElement("td");
+      dateTd.textContent = trip.date
+        ? dateFormatter.format(trip.date)
+        : "—";
+      tr.appendChild(dateTd);
+
+      const locationTd = document.createElement("td");
+      locationTd.innerHTML = `<strong>${trip.location || "Gas Station"}</strong>${
+        trip.transactionNumber
+          ? `<br/><span class="status">#${trip.transactionNumber}</span>`
+          : ""
+      }`;
+      tr.appendChild(locationTd);
+
+      const gallonsTd = document.createElement("td");
+      gallonsTd.textContent = formatGallons(trip.gallons);
+      tr.appendChild(gallonsTd);
+
+      const priceTd = document.createElement("td");
+      priceTd.className = "money";
+      priceTd.textContent = formatMoney(trip.pricePerGallon);
+      tr.appendChild(priceTd);
+
+      const totalTd = document.createElement("td");
+      totalTd.className = "money";
+      totalTd.textContent = formatMoney(trip.totalPrice);
+      tr.appendChild(totalTd);
+
+      gasTripsBody.appendChild(tr);
+    });
+}
+
+function renderWarehouseVisits(rows) {
+  if (!warehouseVisitsBody) return;
+  warehouseVisitsBody.innerHTML = "";
+
+  if (!rows || !rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 3;
+    td.className = "status";
+    td.textContent = "No warehouse trips in this range.";
+    tr.appendChild(td);
+    warehouseVisitsBody.appendChild(tr);
+    return;
+  }
+
+  rows
+    .slice()
+    .sort((a, b) => {
+      const dateA = a.date || new Date(0);
+      const dateB = b.date || new Date(0);
+      return dateB - dateA;
+    })
+    .forEach((visit) => {
+      const tr = document.createElement("tr");
+
+      const dateTd = document.createElement("td");
+      dateTd.textContent = visit.date ? dateFormatter.format(visit.date) : "—";
+      tr.appendChild(dateTd);
+
+      const locationTd = document.createElement("td");
+      locationTd.textContent = visit.location || "—";
+      tr.appendChild(locationTd);
+
+      const totalTd = document.createElement("td");
+      totalTd.className = "money";
+      totalTd.textContent = formatMoney(visit.total);
+      tr.appendChild(totalTd);
+
+      warehouseVisitsBody.appendChild(tr);
+    });
+}
+
+function renderOnlineOrders(rows) {
+  if (!onlineOrdersBody) return;
+  onlineOrdersBody.innerHTML = "";
+
+  if (!rows || !rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "status";
+    td.textContent = "No online orders in this range.";
+    tr.appendChild(td);
+    onlineOrdersBody.appendChild(tr);
+    return;
+  }
+
+  rows
+    .slice()
+    .sort((a, b) => {
+      const dateA = a.date || new Date(0);
+      const dateB = b.date || new Date(0);
+      return dateB - dateA;
+    })
+    .forEach((order) => {
+      const tr = document.createElement("tr");
+      if (order.orderNumber) {
+        tr.dataset.orderNumber = order.orderNumber;
+        tr.classList.add("clickable-row");
+        tr.title = "Click to view order details";
+      }
+
+      const dateTd = document.createElement("td");
+      dateTd.textContent = order.date ? dateFormatter.format(order.date) : "—";
+      tr.appendChild(dateTd);
+
+      const numberTd = document.createElement("td");
+      numberTd.textContent = order.orderNumber;
+      tr.appendChild(numberTd);
+
+      const statusTd = document.createElement("td");
+      statusTd.textContent = order.status || "—";
+      tr.appendChild(statusTd);
+
+      const totalTd = document.createElement("td");
+      totalTd.className = "money";
+      totalTd.textContent = formatMoney(order.total);
+      tr.appendChild(totalTd);
+
+      onlineOrdersBody.appendChild(tr);
+    });
+}
+
+function renderAllVisits(warehouseVisits, onlineOrders, gasTrips) {
+  if (!allVisitsBody) return;
+  allVisitsBody.innerHTML = "";
+
+  const entries = [];
+
+  (warehouseVisits || []).forEach((visit) => {
+    entries.push({
+      date: visit.date,
+      channel: "Warehouse",
+      location: visit.location || "—",
+      total: visit.total
+    });
+  });
+
+  (onlineOrders || []).forEach((order) => {
+    entries.push({
+      date: order.date,
+      channel: "Online",
+      location: order.location || `Order #${order.orderNumber}`,
+      total: order.total,
+      orderNumber: order.orderNumber
+    });
+  });
+
+  (gasTrips || []).forEach((trip) => {
+    entries.push({
+      date: trip.date,
+      channel: "Gas",
+      location: trip.location || "Gas Station",
+      total: trip.totalPrice
+    });
+  });
+
+  if (!entries.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "status";
+    td.textContent = "No trips found in this range.";
+    tr.appendChild(td);
+    allVisitsBody.appendChild(tr);
+    return;
+  }
+
+  entries
+    .sort((a, b) => {
+      const dateA = a.date || new Date(0);
+      const dateB = b.date || new Date(0);
+      return dateB - dateA;
+    })
+    .forEach((entry) => {
+      const tr = document.createElement("tr");
+      if (entry.orderNumber) {
+        tr.dataset.orderNumber = entry.orderNumber;
+        tr.classList.add("clickable-row");
+        tr.title = "Click to view order details";
+      }
+
+      const dateTd = document.createElement("td");
+      dateTd.textContent = entry.date ? dateFormatter.format(entry.date) : "—";
+      tr.appendChild(dateTd);
+
+      const channelTd = document.createElement("td");
+      channelTd.textContent = entry.channel;
+      tr.appendChild(channelTd);
+
+      const locationTd = document.createElement("td");
+      locationTd.textContent = entry.location || "—";
+      tr.appendChild(locationTd);
+
+      const totalTd = document.createElement("td");
+      totalTd.className = "money";
+      totalTd.textContent = formatMoney(entry.total);
+      tr.appendChild(totalTd);
+
+      allVisitsBody.appendChild(tr);
+    });
+}
+
+function renderMonthlyChart(monthlyTotals) {
+  const canvas = document.getElementById("monthlyChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const entries = Array.from(monthlyTotals.entries()).sort((a, b) =>
+    a[0] < b[0] ? -1 : 1
+  );
+
+  const labels = entries.map(([m]) => m);
+  const data = entries.map(([, v]) => v);
+
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  const displayWidth = canvas.clientWidth || 600;
+  const displayHeight = canvas.clientHeight || 360;
+  canvas.width = displayWidth * devicePixelRatio;
+  canvas.height = displayHeight * devicePixelRatio;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.clearRect(0, 0, displayWidth, displayHeight);
+
+  if (!data.length) {
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "14px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No monthly data yet.", displayWidth / 2, displayHeight / 2);
+    return;
+  }
+
+  const padding = 40;
+  const chartHeight = displayHeight - padding * 2;
+  const chartWidth = displayWidth - padding * 2;
+  const slotWidth = chartWidth / data.length;
+  const barWidth = Math.max(slotWidth * 0.6, 8);
+  const maxValue = Math.max(...data, 1);
+
+  ctx.strokeStyle = "#d1d5db";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padding, padding);
+  ctx.lineTo(padding, displayHeight - padding);
+  ctx.lineTo(displayWidth - padding, displayHeight - padding);
+  ctx.stroke();
+
+  const tickCount = 4;
+  ctx.fillStyle = "#6b7280";
+  ctx.font = "11px 'Segoe UI', sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (let i = 0; i <= tickCount; i++) {
+    const value = (maxValue / tickCount) * i;
+    const y =
+      displayHeight - padding - (i / tickCount) * chartHeight;
+    ctx.fillText(formatMoney(value), padding - 6, y);
+    ctx.strokeStyle = "rgba(209,213,219,0.4)";
+    ctx.beginPath();
+    ctx.moveTo(padding, y);
+    ctx.lineTo(displayWidth - padding, y);
+    ctx.stroke();
+  }
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#111827";
+  data.forEach((value, idx) => {
+    const barHeight = (value / maxValue) * chartHeight;
+    const x =
+      padding +
+      idx * slotWidth +
+      (slotWidth - barWidth) / 2;
+    const y = displayHeight - padding - barHeight;
+
+    ctx.fillStyle = "#2563eb";
+    ctx.fillRect(x, y, barWidth, barHeight);
+
+    ctx.fillStyle = "#111827";
+    ctx.font = "11px 'Segoe UI', sans-serif";
+    ctx.fillText(labels[idx], x + barWidth / 2, displayHeight - padding + 6);
+  });
+}
+
+function applyFilterAndRender() {
+  const filteredReceipts = filterReceipts(storedReceipts);
+  const filteredOnlineOrders = filterOnlineOrders(storedOnlineOrders);
+  handleData(filteredReceipts, filteredOnlineOrders);
+}
+
+function setData(newReceipts, newOnlineOrders, newOnlineOrderDetails) {
+  storedReceipts = Array.isArray(newReceipts) ? newReceipts : [];
+  storedOnlineOrders = Array.isArray(newOnlineOrders) ? newOnlineOrders : [];
+  storedOnlineOrderDetails =
+    newOnlineOrderDetails && typeof newOnlineOrderDetails === "object"
+      ? newOnlineOrderDetails
+      : {};
+  const bounds = getCombinedBounds(storedReceipts, storedOnlineOrders);
+  filterState.customStart = bounds.start ? formatInputDate(bounds.start) : null;
+  filterState.customEnd = bounds.end ? formatInputDate(bounds.end) : null;
+  updateCustomDateInputs(bounds);
+  populateMonthOptions(storedReceipts, storedOnlineOrders);
+  applyFilterAndRender();
+}
+
+function handleData(receipts, onlineOrders) {
+  const { itemStats, monthlyTotals, summary, gasStats, warehouseVisits } =
+    processReceipts(receipts);
+  const onlineData = processOnlineOrders(onlineOrders);
+  summary.onlineOrderCount = onlineData.totalOrders;
+  summary.onlineOrderTotal = onlineData.totalSpent;
+
+  renderSummary(summary, onlineData, gasStats, warehouseVisits);
+  if (latestSummaryPayload) {
+    latestSummaryPayload.itemStats = itemStats;
+  }
+  renderAllVisits(warehouseVisits, onlineData.rows, gasStats.trips);
+  renderWarehouseVisits(warehouseVisits);
+  renderTopItemSections(itemStats, onlineData);
+  renderOnlineOrders(onlineData.rows);
+  renderGasTrips(gasStats);
+  renderMonthlyChart(monthlyTotals);
+}
+
+// File upload removed; receipts now flow directly from the extension.
+
+function displayExtensionReceipts(
+  receipts,
+  onlineOrders,
+  onlineOrderDetails,
+  updatedAt
+) {
+  if (!Array.isArray(receipts) || receipts.length === 0) {
+    setData([], onlineOrders || [], onlineOrderDetails || {});
+    statusEl.textContent = "No receipts loaded from extension.";
+    statusEl.classList.add("error");
+    const rangeEl = document.getElementById("dateRange");
+    if (rangeEl) {
+      rangeEl.classList.add("error");
+      rangeEl.textContent = "No receipts loaded.";
+    }
+    return false;
+  }
+  const timestamp = updatedAt
+    ? ` (Updated ${new Date(updatedAt).toLocaleString()})`
+    : "";
+  statusEl.textContent = `Loaded ${receipts.length.toLocaleString()} receipts from extension${timestamp}.`;
+  statusEl.classList.remove("error");
+  setData(receipts, onlineOrders || [], onlineOrderDetails || {});
+  return true;
+}
+
+function loadReceiptsFromStorage() {
+  if (!hasChrome || !chrome.storage || !chrome.storage.local) return;
+  chrome.storage.local.get(EXTENSION_STORAGE_KEY, (result) => {
+    if (chrome.runtime?.lastError) {
+      console.warn(
+        "Costco Receipts Dashboard: could not read storage",
+        chrome.runtime.lastError
+      );
+      return;
+    }
+    const stored = result ? result[EXTENSION_STORAGE_KEY] : null;
+    if (!stored) return;
+    displayExtensionReceipts(
+      stored.receipts,
+      stored.onlineOrders,
+      stored.orderDetails,
+      stored.updatedAt
+    );
+  });
+}
+
+if (hasChrome) {
+  if (chrome.storage?.local) {
+    loadReceiptsFromStorage();
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local" || !changes[EXTENSION_STORAGE_KEY]) return;
+      const newValue = changes[EXTENSION_STORAGE_KEY].newValue;
+      if (!newValue) return;
+      displayExtensionReceipts(
+        newValue.receipts,
+        newValue.onlineOrders,
+        newValue.orderDetails,
+        newValue.updatedAt
+      );
+    });
+  }
+
+  if (chrome.runtime && chrome.runtime.sendMessage) {
+    chrome.runtime.sendMessage({ type: "getReceipts" }, (resp) => {
+      if (chrome.runtime.lastError) {
+        console.warn(
+          "No receipts from extension:",
+          chrome.runtime.lastError
+        );
+        return;
+      }
+      if (resp) {
+        displayExtensionReceipts(
+          resp.receipts,
+          resp.onlineOrders,
+          resp.orderDetails,
+          resp.updatedAt
+        );
+      }
+    });
+  }
+}
+function renderTopItemSections(itemStats, onlineData) {
+  if (!topItemsSection) return;
+  if (activeTab === "gas") {
+    topItemsSection.style.display = "none";
+    return;
+  }
+  topItemsSection.style.display = "grid";
+
+  let combinedStats = new Map();
+  if (activeTab === "online") {
+    combinedStats = buildOnlineItemStats(onlineData.rows);
+  } else if (activeTab === "warehouse") {
+    combinedStats = itemStats;
+  } else {
+    combinedStats = mergeItemStats(itemStats, buildOnlineItemStats(onlineData.rows));
+  }
+
+  renderMostTotalSpent(combinedStats);
+  renderMostPurchased(combinedStats);
+  renderMostExpensive(combinedStats);
+  renderPriceIncreases(combinedStats);
+}
+function buildOnlineItemStats(rows) {
+  const stats = new Map();
+  if (!Array.isArray(rows)) return stats;
+  rows.forEach((order) => {
+    const items = Array.isArray(order.items || order.orderLineItems)
+      ? order.orderLineItems
+      : [];
+    items.forEach((item) => {
+      const key = `${item.itemNumber || item.itemId || order.orderNumber}|online`;
+      const name = `${item.itemDescription || `Order ${order.orderNumber}`}`;
+      const price = Number(item.amount || item.lineTotalAmount || 0);
+
+      let stat = stats.get(key);
+      if (!stat) {
+        stat = {
+          itemNumber: item.itemNumber || item.itemId || order.orderNumber,
+          name: `${name} (Online)`,
+          totalSpent: 0,
+          totalUnits: 0,
+          purchases: 0,
+          prices: []
+        };
+        stats.set(key, stat);
+      }
+      stat.totalSpent += price;
+      stat.totalUnits += 1;
+      stat.purchases += 1;
+      stat.prices.push({ date: order.date || new Date(), price });
+    });
+  });
+
+  return stats;
+}
+
+function mergeItemStats(warehouseStats, onlineStats) {
+  const combined = new Map();
+  const addStat = (map) => {
+    Array.from(map.entries()).forEach(([key, value]) => {
+      const existing = combined.get(key);
+      if (existing) {
+        existing.totalSpent += value.totalSpent;
+        existing.totalUnits += value.totalUnits;
+        existing.purchases += value.purchases;
+        existing.prices.push(...value.prices);
+      } else {
+        combined.set(key, { ...value });
+      }
+    });
+  };
+
+  addStat(warehouseStats || new Map());
+  addStat(onlineStats || new Map());
+
+  return combined;
+}
+
+function handleOrderRowInteraction(event) {
+  const row = event.target.closest("tr[data-order-number]");
+  if (!row) return;
+  const orderNumber = row.dataset.orderNumber;
+  if (!orderNumber) return;
+  fetchAndDisplayOrderDetails(orderNumber);
+}
+
+function openOrderDetailsModal(message) {
+  if (!orderDetailsModal) return;
+  orderDetailsModal.classList.add("open");
+  orderDetailsModal.setAttribute("aria-hidden", "false");
+  if (orderDetailsContent && message) {
+    orderDetailsContent.innerHTML = `<p class="status">${message}</p>`;
+  }
+}
+
+function closeOrderDetailsModal() {
+  if (!orderDetailsModal) return;
+  orderDetailsModal.classList.remove("open");
+  orderDetailsModal.setAttribute("aria-hidden", "true");
+}
+
+function fetchAndDisplayOrderDetails(orderNumber) {
+  openOrderDetailsModal(`Loading details for order #${orderNumber}...`);
+  const detail = storedOnlineOrderDetails
+    ? storedOnlineOrderDetails[orderNumber]
+    : null;
+  if (!detail) {
+    if (orderDetailsContent) {
+      orderDetailsContent.innerHTML =
+        "<p class=\"status error\">No order details were saved for this order. Try rerunning the download from Costco.com.</p>";
+    }
+    return;
+  }
+  renderOrderDetailsView(detail, orderNumber);
+}
+
+function renderOrderDetailsView(detail, fallbackOrderNumber) {
+  if (!orderDetailsContent) return;
+  const order = Array.isArray(detail) ? detail[0] : detail;
+  if (!order) {
+    orderDetailsContent.innerHTML =
+      "<p class=\"status error\">No order information returned for that selection.</p>";
+    return;
+  }
+
+  const placedDate = formatDetailDate(order.orderPlacedDate);
+  const totalFormatted = formatMoney(Number(order.orderTotal) || 0);
+  const meta = [
+    { label: "Order #", value: order.orderNumber || fallbackOrderNumber || "—" },
+    { label: "Placed", value: placedDate },
+    { label: "Status", value: order.status || "—" },
+    { label: "Warehouse", value: order.warehouseNumber || "Online" },
+    { label: "Total", value: totalFormatted }
+  ];
+
+  const metaHtml = meta
+    .map(
+      (entry) => `
+        <div>
+          <span class="label">${entry.label}</span>
+          <span class="value">${entry.value}</span>
+        </div>
+      `
+    )
+    .join("");
+
+  const chargesHtml = buildChargesList(order);
+  const itemsHtml = buildItemsTable(order);
+
+  orderDetailsContent.innerHTML = `
+    <h3>Order #${order.orderNumber || fallbackOrderNumber || "—"}</h3>
+    <div class="order-details-meta">
+      ${metaHtml}
+    </div>
+    <div class="order-details-section">
+      <h4>Charges</h4>
+      ${chargesHtml}
+    </div>
+    <div class="order-details-section order-details-items">
+      <h4>Items</h4>
+      ${itemsHtml}
+    </div>
+  `;
+}
+
+function formatDetailDate(value) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    return value;
+  }
+  return dateFormatter.format(parsed);
+}
+
+function buildChargesList(order) {
+  const entries = [
+    { label: "Merchandise", value: order.merchandiseTotal },
+    { label: "Shipping & Handling", value: order.shippingAndHandling },
+    { label: "Grocery Surcharge", value: order.grocerySurcharge },
+    { label: "Retail Delivery Fee", value: order.retailDeliveryFee },
+    { label: "Taxes", value: order.uSTaxTotal1 },
+    { label: "Order Total", value: order.orderTotal }
+  ].filter((entry) => entry.value != null);
+
+  if (!entries.length) {
+    return '<p class="status">No charge breakdown available.</p>';
+  }
+
+  return `
+    <ul class="charges-list">
+      ${entries
+        .map(
+          (entry) => `
+            <li>
+              <span>${entry.label}</span>
+              <span>${formatMoney(Number(entry.value) || 0)}</span>
+            </li>
+          `
+        )
+        .join("")}
+    </ul>
+  `;
+}
+
+function buildItemsTable(order) {
+  const items = flattenOrderLineItems(order);
+  if (!items.length) {
+    return '<p class="status">No line items were returned.</p>';
+  }
+
+  const rows = items
+    .map(
+      (item, idx) => `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>
+            <strong>${item.description}</strong><br/>
+            <span class="status">${item.status || "—"}</span>
+          </td>
+          <td>${item.quantity.toLocaleString()}</td>
+          <td class="money">${formatMoney(item.price)}</td>
+          <td class="money">${formatMoney(item.total)}</td>
+        </tr>
+      `
+    )
+    .join("");
+
+  return `
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Item</th>
+            <th>Qty</th>
+            <th>Unit Price</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function flattenOrderLineItems(order) {
+  const items = [];
+  const addresses = Array.isArray(order.shipToAddress) ? order.shipToAddress : [];
+  addresses.forEach((ship) => {
+    const lines = Array.isArray(ship.orderLineItems) ? ship.orderLineItems : [];
+    lines.forEach((line) => {
+      const quantity = Number(line.quantity != null ? line.quantity : line.orderedTotalQuantity) || 0;
+      const price = Number(line.price != null ? line.price : line.unitPrice) || 0;
+      const total =
+        Number(line.merchandiseTotalAmount) ||
+        (quantity && price ? quantity * price : 0);
+      items.push({
+        description:
+          line.itemDescription ||
+          line.sourceItemDescription ||
+          `Item #${line.itemNumber || line.itemId || line.lineNumber || ""}`,
+        quantity,
+        price,
+        total,
+        status: line.orderStatus || line.shipToWarehousePackageStatus || line.status || ""
+      });
+    });
+  });
+  return items;
+}
