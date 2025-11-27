@@ -1,6 +1,7 @@
 // background.js (MV3)
 
 const RECEIPT_STORAGE_KEY = "costcoReceiptsData";
+const ORDER_STATUS_URL = "https://www.costco.com/OrderStatusCmd";
 let lastReceipts = [];
 let lastWarehouseDetails = {};
 let lastOnlineOrders = [];
@@ -106,3 +107,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+if (chrome.contextMenus) {
+  chrome.runtime.onInstalled.addListener(() => {
+    chrome.contextMenus.removeAll(() => {
+      try {
+        chrome.contextMenus.create({
+          id: "open-costco-order-status",
+          title: "Open Costco Order Status",
+          contexts: ["action"]
+        });
+      } catch (err) {
+        console.warn("Costco Receipts Extension: could not create context menu", err);
+      }
+    });
+  });
+
+  chrome.contextMenus.onClicked.addListener((info) => {
+    if (info.menuItemId === "open-costco-order-status") {
+      openOrderStatusTab();
+    }
+  });
+}
+
+if (chrome.action?.onClicked) {
+  chrome.action.onClicked.addListener(() => {
+    openOrderStatusTab();
+  });
+}
+
+function openOrderStatusTab() {
+  chrome.tabs.create({ url: ORDER_STATUS_URL });
+}

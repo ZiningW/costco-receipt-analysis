@@ -9,6 +9,10 @@ const dateFormatter = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
   year: "numeric"
 });
+const monthFormatter = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  year: "numeric"
+});
 
 const statusEl = document.getElementById("status");
 const EXTENSION_STORAGE_KEY = "costcoReceiptsData";
@@ -23,6 +27,7 @@ const downloadJsonBtn = document.getElementById("downloadJsonBtn");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabContents = document.querySelectorAll(".tab-content");
 const topItemsSection = document.getElementById("topItemsSection");
+const topItemsSecondarySection = document.getElementById("topItemsSecondarySection");
 const allVisitsBody = document.getElementById("allVisitsBody");
 const warehouseVisitsBody = document.getElementById("warehouseVisitsBody");
 const onlineOrdersBody = document.getElementById("onlineOrdersBody");
@@ -30,10 +35,29 @@ const gasTripsBody = document.getElementById("gasTripsBody");
 const orderDetailsModal = document.getElementById("orderDetailsModal");
 const orderDetailsContent = document.getElementById("orderDetailsContent");
 const orderDetailsCloseBtn = document.getElementById("orderDetailsClose");
+const chartCanvas = document.getElementById("metricsChart");
+const chartControls = document.getElementById("chartControls");
+const chartSubtitle = document.getElementById("chartSubtitle");
+const chartTooltip = document.getElementById("chartTooltip");
 let activeTab = "all";
 let latestSummaryPayload = null;
 let storedOnlineOrderDetails = {};
 let storedWarehouseDetails = {};
+const chartState = {
+  canvas: chartCanvas,
+  ctx: chartCanvas ? chartCanvas.getContext("2d") : null,
+  controls: chartControls,
+  subtitle: chartSubtitle,
+  tooltipEl: chartTooltip,
+  data: null,
+  hitRegions: [],
+  currentMetric: {
+    all: "allSpent",
+    warehouse: "warehouseSpent",
+    online: "onlineSpent",
+    gas: "gasSpent"
+  }
+};
 
 const filterState = {
   preset: presetSelect ? presetSelect.value : "all",
@@ -104,6 +128,7 @@ if (downloadJsonBtn) {
   });
 }
 updateCustomInputsDisabled();
+initChartInteractions();
 
 const tabModeMap = {
   allTab: "all",
@@ -138,6 +163,7 @@ tabButtons.forEach((button) => {
         latestSummaryPayload.gasStats.trips
       );
     }
+    updateChartControls();
   });
 });
 
@@ -202,6 +228,20 @@ function parseReceiptDate(receipt) {
   return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
 
+function getMonthKey(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.valueOf())) return null;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function formatMonthLabel(monthKey) {
+  const [year, month] = monthKey.split("-");
+  const date = new Date(Number(year), Number(month) - 1, 1);
+  if (Number.isNaN(date.valueOf())) return monthKey;
+  return monthFormatter.format(date);
+}
+
 function formatReceiptDate(receipt) {
   const parsed = parseReceiptDate(receipt);
   return parsed ? dateFormatter.format(parsed) : "—";
@@ -216,11 +256,33 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function formatItemCell(name, itemNumber) {
+function formatItemCell(name, itemNumber, maxChars) {
   const displayName = name || "Unnamed Item";
-  const truncated = `<strong class="truncate" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</strong>`;
+  const visibleText =
+    maxChars && displayName.length > maxChars
+      ? `${displayName.slice(0, maxChars).trim()}…`
+      : displayName;
+  const truncated = `<strong class="truncate" title="${escapeHtml(displayName)}">${escapeHtml(
+    visibleText
+  )}</strong>`;
   const code = itemNumber ? `#${escapeHtml(itemNumber)}` : "#–";
   return `${truncated}<br/><span class="status">${code}</span>`;
+}
+
+function clearTableBody(bodyId) {
+  const el = document.getElementById(bodyId);
+  if (el) {
+    el.innerHTML = "";
+  }
+}
+
+function formatReturnCount(count) {
+  return (count || 0).toLocaleString();
+}
+
+function formatReturnAmount(amount) {
+  const value = Number(amount) || 0;
+  return `-${formatMoney(value)}`;
 }
 
 function buildLocationMapFromVisits(visits) {
@@ -424,6 +486,68 @@ function filterOnlineOrders(orders) {
 
   return filtered;
 }
+
+function applyFilterAndRender() {
+  const filteredReceipts = filterReceipts(storedReceipts);
+  const filteredOnlineOrders = filterOnlineOrders(storedOnlineOrders);
+  handleData(filteredReceipts, filteredOnlineOrders);
+}
+
+function setData(newReceipts, newWarehouseDetails, newOnlineOrders, newOnlineOrderDetails) {
+  storedReceipts = Array.isArray(newReceipts) ? newReceipts : [];
+  storedWarehouseDetails =
+    newWarehouseDetails && typeof newWarehouseDetails === "object"
+      ? newWarehouseDetails
+      : {};
+  storedOnlineOrders = Array.isArray(newOnlineOrders) ? newOnlineOrders : [];
+  storedOnlineOrderDetails =
+    newOnlineOrderDetails && typeof newOnlineOrderDetails === "object"
+      ? newOnlineOrderDetails
+      : {};
+  const bounds = getCombinedBounds(storedReceipts, storedOnlineOrders);
+  filterState.customStart = bounds.start ? formatInputDate(bounds.start) : null;
+  filterState.customEnd = bounds.end ? formatInputDate(bounds.end) : null;
+  updateCustomDateInputs(bounds);
+  populateMonthOptions(storedReceipts, storedOnlineOrders);
+  applyFilterAndRender();
+}
+
+function handleData(receipts, onlineOrders) {
+  const { itemStats, monthlyWarehouse, summary, gasStats, warehouseVisits } =
+    processReceipts(receipts);
+  const onlineData = processOnlineOrders(onlineOrders);
+  summary.onlineOrderCount = onlineData.totalOrders;
+  summary.onlineOrderTotal = onlineData.totalSpent;
+
+  const monthlyData = buildMonthlyDataset(
+    monthlyWarehouse,
+    onlineData.monthly,
+    gasStats.monthly
+  );
+  setMetricsChartData(monthlyData);
+
+  renderSummary(summary, onlineData, gasStats, warehouseVisits);
+  if (latestSummaryPayload) {
+    latestSummaryPayload.itemStats = itemStats;
+    latestSummaryPayload.onlineOrders = onlineOrders;
+    latestSummaryPayload.monthlyData = monthlyData;
+  } else {
+    latestSummaryPayload = {
+      summary,
+      onlineData,
+      gasStats,
+      warehouseVisits,
+      itemStats,
+      onlineOrders,
+      monthlyData
+    };
+  }
+  renderAllVisits(warehouseVisits, onlineData.rows, gasStats.trips);
+  renderWarehouseVisits(warehouseVisits);
+  renderTopItemSections(itemStats, onlineData, onlineOrders);
+  renderOnlineOrders(onlineData.rows);
+  renderGasTrips(gasStats);
+}
 function monthsBetween(d1, d2) {
   const msPerMonth = 1000 * 60 * 60 * 24 * 30.4375;
   return Math.abs(d2 - d1) / msPerMonth;
@@ -431,22 +555,26 @@ function monthsBetween(d1, d2) {
 
 function processReceipts(receipts) {
   const itemStats = new Map();
-  const monthlyTotals = new Map();
   const gasStats = {
     trips: [],
     totalTrips: 0,
     totalGallons: 0,
     totalCost: 0,
     locationCounts: new Map(),
-    dateRange: { start: null, end: null }
+    dateRange: { start: null, end: null },
+    monthly: new Map()
   };
   const dateRange = { start: null, end: null };
   const warehouseVisits = [];
+  const monthlyWarehouse = new Map();
   let totalSpent = 0;
   let sumItemAmounts = 0;
   let totalUnits = 0;
   let shoppingReceipts = 0;
   let gasOnlyReceipts = 0;
+  let returnCount = 0;
+  let returnAmount = 0;
+  let totalTax = 0;
 
   receipts.forEach((receipt) => {
     const total = Number(receipt.total) || 0;
@@ -466,6 +594,7 @@ function processReceipts(receipts) {
       receipt.transactionDateTime ||
       (receipt.transactionDate ? `${receipt.transactionDate}T00:00:00` : null);
     const trxDate = dateStr ? new Date(dateStr) : new Date();
+    let receiptUnits = 0;
 
     items.forEach((item) => {
       const unit = Number(item.unit) || 0;
@@ -477,7 +606,13 @@ function processReceipts(receipts) {
       if (!isGas) {
         const key = `${item.itemNumber}|${(item.itemDescription01 || "").trim()}`;
         const name = (item.itemDescription01 || "").trim();
-        const perUnitPrice = amount / unit;
+        let perUnitPrice = Number(item.itemUnitPriceAmount);
+        if (!perUnitPrice && unit > 0) {
+          perUnitPrice = amount / unit;
+        }
+        if (!perUnitPrice && unit === 0) {
+          perUnitPrice = amount;
+        }
 
         let stat = itemStats.get(key);
         if (!stat) {
@@ -498,6 +633,7 @@ function processReceipts(receipts) {
         stat.prices.push({ date: trxDate, price: perUnitPrice });
         sumItemAmounts += amount;
         totalUnits += unit;
+        receiptUnits += unit;
       }
 
       if (isGas) {
@@ -539,6 +675,18 @@ function processReceipts(receipts) {
               gasStats.dateRange.end = tripDate;
             }
           }
+          const monthKey = tripDate ? getMonthKey(tripDate) : null;
+          if (monthKey) {
+            let entry = gasStats.monthly.get(monthKey);
+            if (!entry) {
+              entry = { spent: 0, trips: 0, totalGallons: 0, locations: new Map() };
+              gasStats.monthly.set(monthKey, entry);
+            }
+            entry.spent += totalPrice;
+            entry.trips += 1;
+            entry.totalGallons += gallons;
+            entry.locations.set(location, (entry.locations.get(location) || 0) + 1);
+          }
         }
       }
     });
@@ -546,30 +694,47 @@ function processReceipts(receipts) {
     if (gasItems.length && gasItems.length === items.length) {
       gasOnlyReceipts += 1;
     } else {
-      shoppingReceipts += 1;
-      totalSpent += total;
+      const location =
+        receipt.warehouseName ||
+        receipt.warehouseShortName ||
+        receipt.warehouseCity ||
+        `Warehouse #${receipt.warehouseNumber || "–"}`;
+      const isReturn = total < 0;
       warehouseVisits.push({
         date: parsedDate,
-        location:
-          receipt.warehouseName ||
-          receipt.warehouseShortName ||
-          receipt.warehouseCity ||
-          `Warehouse #${receipt.warehouseNumber || "–"}`,
+        location,
         total,
-        barcode: receipt.transactionBarcode || receipt.transactionNumber || ""
-      });
-      items.forEach((item) => {
-        if (isGasItem(item)) return;
-        sumItemAmounts += Number(item.amount) || 0;
-        totalUnits += Number(item.unit) || 0;
+        barcode: receipt.transactionBarcode || receipt.transactionNumber || "",
+        isReturn
       });
 
-      const monthKey = (receipt.transactionDate || "").slice(0, 7);
-      if (monthKey) {
-        monthlyTotals.set(
-          monthKey,
-          (monthlyTotals.get(monthKey) || 0) + total
-        );
+      const receiptTax = Number(receipt.taxes) || 0;
+      if (isReturn) {
+        returnCount += 1;
+        returnAmount += Math.abs(total);
+        totalTax -= receiptTax;
+      } else {
+        shoppingReceipts += 1;
+        totalSpent += total;
+        totalTax += receiptTax;
+        items.forEach((item) => {
+          if (isGasItem(item)) return;
+          sumItemAmounts += Number(item.amount) || 0;
+          totalUnits += Number(item.unit) || 0;
+        });
+
+        const monthKey = (receipt.transactionDate || "").slice(0, 7);
+        if (monthKey) {
+          let entry = monthlyWarehouse.get(monthKey);
+          if (!entry) {
+            entry = { spent: 0, trips: 0, items: 0, locations: new Map() };
+            monthlyWarehouse.set(monthKey, entry);
+          }
+          entry.spent += total;
+          entry.trips += 1;
+          entry.items += receiptUnits;
+          entry.locations.set(location, (entry.locations.get(location) || 0) + 1);
+        }
       }
     }
   });
@@ -581,7 +746,7 @@ function processReceipts(receipts) {
 
   return {
     itemStats,
-    monthlyTotals,
+    monthlyWarehouse,
     gasStats,
     warehouseVisits,
     summary: {
@@ -593,7 +758,10 @@ function processReceipts(receipts) {
       uniqueItems,
       avgItemPrice,
       avgPerReceipt,
+      returnCount,
+      returnAmount,
       gasStatsTotal: gasStats.totalCost,
+      totalTax,
       dateRange: {
         start: dateRange.start ? dateFormatter.format(dateRange.start) : null,
         end: dateRange.end ? dateFormatter.format(dateRange.end) : null
@@ -608,28 +776,56 @@ function processOnlineOrders(orders) {
   let totalItems = 0;
   const uniqueItems = new Set();
   const locationCounts = new Map();
+  let returnCount = 0;
+  let returnAmount = 0;
+  let purchaseCount = 0;
+  const monthlyTotals = new Map();
+  let totalTax = 0;
 
   if (Array.isArray(orders)) {
     orders.forEach((order) => {
       const total = Number(order.orderTotal) || 0;
-      totalSpent += total;
-      const location =
-        order.warehouseNumber != null
-          ? `Warehouse #${order.warehouseNumber}`
-          : "Online";
-      locationCounts.set(location, (locationCounts.get(location) || 0) + 1);
+      const isReturn = total < 0;
+      const orderTax = Number(order.uSTaxTotal1) || 0;
+      if (isReturn) {
+        returnCount += 1;
+        returnAmount += Math.abs(total);
+        totalTax -= orderTax;
+      } else {
+        totalSpent += total;
+        purchaseCount += 1;
+        totalTax += orderTax;
+      }
+      const location = "Online";
+      if (!isReturn) {
+        locationCounts.set(location, (locationCounts.get(location) || 0) + 1);
+      }
 
       const itemList = Array.isArray(order.orderLineItems)
         ? order.orderLineItems
         : [];
-      totalItems += itemList.length;
-      itemList.forEach((item) => {
-        if (item.itemNumber) {
-          uniqueItems.add(item.itemNumber);
-        } else if (item.itemId) {
-          uniqueItems.add(item.itemId);
+      if (!isReturn) {
+        totalItems += itemList.length;
+        itemList.forEach((item) => {
+          if (item.itemNumber) {
+            uniqueItems.add(item.itemNumber);
+          } else if (item.itemId) {
+            uniqueItems.add(item.itemId);
+          }
+        });
+        const date = parseOnlineOrderDate(order);
+        const monthKey = date ? getMonthKey(date) : null;
+        if (monthKey) {
+          let entry = monthlyTotals.get(monthKey);
+          if (!entry) {
+            entry = { spent: 0, orders: 0, items: 0 };
+            monthlyTotals.set(monthKey, entry);
+          }
+          entry.spent += total;
+          entry.orders += 1;
+          entry.items += itemList.length;
         }
-      });
+      }
 
       rows.push({
         date: parseOnlineOrderDate(order),
@@ -640,7 +836,8 @@ function processOnlineOrders(orders) {
           "—",
         status: order.status || "",
         total,
-        location
+        location,
+        isReturn
       });
     });
   }
@@ -649,11 +846,15 @@ function processOnlineOrders(orders) {
   const dateEnd = latestDate(rows.map((r) => r.date));
 
   return {
-    totalOrders: rows.length,
+    totalOrders: purchaseCount,
     totalSpent,
     totalItems,
     uniqueItems: uniqueItems.size,
     locationCounts,
+    returnCount,
+    returnAmount,
+    monthly: monthlyTotals,
+    totalTax,
     dateRangeText: {
       start: dateStart ? dateFormatter.format(dateStart) : null,
       end: dateEnd ? dateFormatter.format(dateEnd) : null
@@ -694,17 +895,23 @@ function renderSummary(summary, onlineData, gasStats, warehouseVisits) {
     gasLocationMap
   );
 
-  cards.forEach(({ label, value }) => {
+  cards.forEach(({ label, value, sub, negative }) => {
     const card = document.createElement("div");
     card.className = "summary-card";
     const labelEl = document.createElement("div");
     labelEl.className = "label";
     labelEl.textContent = label;
     const valueEl = document.createElement("div");
-    valueEl.className = "value";
+    valueEl.className = negative ? "value negative" : "value";
     valueEl.textContent = value;
     card.appendChild(labelEl);
     card.appendChild(valueEl);
+    if (sub) {
+      const subEl = document.createElement("div");
+      subEl.className = "sub";
+      subEl.textContent = sub;
+      card.appendChild(subEl);
+    }
     summaryGrid.appendChild(card);
   });
 
@@ -728,14 +935,29 @@ function buildSummaryCards(
   let locations = new Map();
   let coverage = "";
 
+  const netWarehouseSpent =
+    summary.totalSpent - (summary.returnAmount || 0);
+  const netOnlineSpent =
+    onlineData.totalSpent - (onlineData.returnAmount || 0);
+
   if (tab === "warehouse") {
     cards = [
       { label: "Trips", value: summary.shoppingReceipts.toLocaleString() },
-      { label: "Total Spent", value: formatMoney(summary.totalSpent) },
+      {
+        label: "Total Spent (incl. tax)",
+        value: `${formatMoney(netWarehouseSpent)}`,
+        sub: `Tax: ${formatMoney(summary.totalTax || 0)}`
+      },
       { label: "Total Items", value: summary.totalUnits.toLocaleString() },
       { label: "Unique Items", value: summary.uniqueItems.toLocaleString() },
       { label: "Avg Item Price", value: formatMoney(summary.avgItemPrice) },
-      { label: "Avg Per Receipt", value: formatMoney(summary.avgPerReceipt) }
+      { label: "Avg Per Receipt", value: formatMoney(summary.avgPerReceipt) },
+      {
+        label: "Returns",
+        value: formatReturnAmount(summary.returnAmount),
+        sub: `${formatReturnCount(summary.returnCount)} returns`,
+        negative: true
+      }
     ];
     locations = warehouseLocations;
     coverage = buildCoverageText(
@@ -746,18 +968,28 @@ function buildSummaryCards(
     const totalItems = onlineData.totalItems || 0;
     const uniqueItems = onlineData.uniqueItems || 0;
     const avgItemPrice =
-      totalItems > 0 ? formatMoney(onlineData.totalSpent / totalItems) : formatMoney(0);
+      totalItems > 0 ? formatMoney(netOnlineSpent / totalItems) : formatMoney(0);
     const avgPerOrder =
       onlineData.totalOrders > 0
-        ? formatMoney(onlineData.totalSpent / onlineData.totalOrders)
+        ? formatMoney(netOnlineSpent / onlineData.totalOrders)
         : formatMoney(0);
     cards = [
       { label: "Orders", value: onlineData.totalOrders.toLocaleString() },
-      { label: "Total Spent", value: formatMoney(onlineData.totalSpent) },
+      {
+        label: "Total Spent (incl. tax)",
+        value: `${formatMoney(netOnlineSpent)}`,
+        sub: `Tax: ${formatMoney(onlineData.totalTax || 0)}`
+      },
       { label: "Total Items", value: totalItems.toLocaleString() },
       { label: "Unique Items", value: uniqueItems.toLocaleString() },
       { label: "Avg Item Price", value: avgItemPrice },
-      { label: "Avg Per Receipt", value: avgPerOrder }
+      { label: "Avg Per Receipt", value: avgPerOrder },
+      {
+        label: "Returns",
+        value: formatReturnAmount(onlineData.returnAmount),
+        sub: `${formatReturnCount(onlineData.returnCount)} returns`,
+        negative: true
+      }
     ];
     locations = onlineLocations;
     coverage = buildCoverageText(
@@ -782,12 +1014,24 @@ function buildSummaryCards(
     const totalTrips =
       summary.shoppingReceipts + gasStats.totalTrips + onlineData.totalOrders;
     const totalSpentAll =
-      summary.totalSpent + gasStats.totalCost + onlineData.totalSpent;
+      netWarehouseSpent + gasStats.totalCost + netOnlineSpent;
     const avgPerTrip = totalTrips > 0 ? totalSpentAll / totalTrips : 0;
+    const totalTax =
+      (summary.totalTax || 0) + (onlineData.totalTax || 0);
     cards = [
       { label: "Trips", value: totalTrips.toLocaleString() },
-      { label: "Total Spent", value: formatMoney(totalSpentAll) },
-      { label: "Average per Trip", value: formatMoney(avgPerTrip) }
+      {
+        label: "Total Spent (incl. tax)",
+        value: `${formatMoney(totalSpentAll)}`,
+        sub: `Tax: ${formatMoney(totalTax)}`
+      },
+      { label: "Average per Trip", value: formatMoney(avgPerTrip) },
+      {
+        label: "Returns",
+        value: formatReturnAmount((summary.returnAmount || 0) + (onlineData.returnAmount || 0)),
+        sub: `${formatReturnCount((summary.returnCount || 0) + (onlineData.returnCount || 0))} returns`,
+        negative: true
+      }
     ];
     locations = mergeLocationMaps([
       warehouseLocations,
@@ -868,7 +1112,7 @@ function buildCoverageText(start, end) {
   return `Showing data from ${start} → ${end}`;
 }
 
-function renderMostTotalSpent(itemStats) {
+function renderMostTotalSpent(itemStats, nameCharLimit) {
   const tbody = document.getElementById("mostTotalSpentBody");
   tbody.innerHTML = "";
 
@@ -884,7 +1128,7 @@ function renderMostTotalSpent(itemStats) {
     tr.appendChild(rankTd);
 
     const itemTd = document.createElement("td");
-    itemTd.innerHTML = formatItemCell(row.name, row.itemNumber);
+    itemTd.innerHTML = formatItemCell(row.name, row.itemNumber, nameCharLimit);
     tr.appendChild(itemTd);
 
     const totalTd = document.createElement("td");
@@ -905,7 +1149,7 @@ function renderMostTotalSpent(itemStats) {
   });
 }
 
-function renderMostPurchased(itemStats) {
+function renderMostPurchased(itemStats, nameCharLimit) {
   const tbody = document.getElementById("mostPurchasedBody");
   tbody.innerHTML = "";
 
@@ -921,7 +1165,7 @@ function renderMostPurchased(itemStats) {
     tr.appendChild(rankTd);
 
     const itemTd = document.createElement("td");
-    itemTd.innerHTML = formatItemCell(row.name, row.itemNumber);
+    itemTd.innerHTML = formatItemCell(row.name, row.itemNumber, nameCharLimit);
     tr.appendChild(itemTd);
 
     const timesTd = document.createElement("td");
@@ -955,7 +1199,7 @@ function renderMostPurchased(itemStats) {
   });
 }
 
-function renderMostExpensive(itemStats) {
+function renderMostExpensive(itemStats, nameCharLimit) {
   const tbody = document.getElementById("mostExpensiveBody");
   tbody.innerHTML = "";
 
@@ -977,7 +1221,7 @@ function renderMostExpensive(itemStats) {
     tr.appendChild(rankTd);
 
     const itemTd = document.createElement("td");
-    itemTd.innerHTML = formatItemCell(row.name, row.itemNumber);
+    itemTd.innerHTML = formatItemCell(row.name, row.itemNumber, nameCharLimit);
     tr.appendChild(itemTd);
 
     const avgTd = document.createElement("td");
@@ -998,7 +1242,7 @@ function renderMostExpensive(itemStats) {
   });
 }
 
-function renderPriceIncreases(itemStats) {
+function renderPriceIncreases(itemStats, nameCharLimit) {
   const tbody = document.getElementById("priceIncreaseBody");
   tbody.innerHTML = "";
 
@@ -1051,9 +1295,9 @@ function renderPriceIncreases(itemStats) {
       rankTd.textContent = idx + 1;
       tr.appendChild(rankTd);
 
-      const itemTd = document.createElement("td");
-      itemTd.innerHTML = formatItemCell(row.name, row.itemNumber);
-      tr.appendChild(itemTd);
+    const itemTd = document.createElement("td");
+    itemTd.innerHTML = formatItemCell(row.name, row.itemNumber, nameCharLimit);
+    tr.appendChild(itemTd);
 
       const minMaxTd = document.createElement("td");
       minMaxTd.className = "money";
@@ -1334,129 +1578,641 @@ function renderAllVisits(warehouseVisits, onlineOrders, gasTrips) {
     });
 }
 
-function renderMonthlyChart(monthlyTotals) {
-  const canvas = document.getElementById("monthlyChart");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const entries = Array.from(monthlyTotals.entries()).sort((a, b) =>
-    a[0] < b[0] ? -1 : 1
-  );
+const STACK_COLORS = ["#2563eb", "#0ea5e9", "#a855f7", "#f97316", "#f43f5e"];
+const CHART_SUBTITLES = {
+  all: "All spending channels combined.",
+  warehouse: "Warehouse purchases only.",
+  online: "Online orders only.",
+  gas: "Gas station activity."
+};
+const CHART_METRICS = {
+  all: [
+    { id: "allSpent", label: "Monthly Spend", builder: (data) => buildSimpleSeries(data.all, (entry) => entry.spent, formatMoney) },
+    {
+      id: "allTrips",
+      label: "Trips per Month",
+      builder: (data) =>
+        buildSimpleSeries(data.all, (entry) => entry.trips, formatNumber, { integerTicks: true })
+    },
+    {
+      id: "allItems",
+      label: "Items per Month",
+      builder: (data) =>
+        buildSimpleSeries(data.all, (entry) => entry.items, formatNumber, { integerTicks: true })
+    },
+    { id: "allWarehouses", label: "Warehouses Visited", builder: (data) => buildWarehouseStackedSeries(data.warehouse) },
+    {
+      id: "allAvg",
+      label: "Avg Spend per Trip",
+      builder: (data) => buildAverageSeries(data.all, (entry) => entry.spent, (entry) => entry.trips, formatMoney)
+    }
+  ],
+  warehouse: [
+    { id: "warehouseSpent", label: "Monthly Spend", builder: (data) => buildSimpleSeries(data.warehouse, (entry) => entry.spent, formatMoney) },
+    {
+      id: "warehouseTrips",
+      label: "Trips per Month",
+      builder: (data) =>
+        buildSimpleSeries(data.warehouse, (entry) => entry.trips, formatNumber, { integerTicks: true })
+    },
+    {
+      id: "warehouseItems",
+      label: "Items per Month",
+      builder: (data) =>
+        buildSimpleSeries(data.warehouse, (entry) => entry.items, formatNumber, { integerTicks: true })
+    },
+    { id: "warehouseWarehouses", label: "Warehouses Visited", builder: (data) => buildWarehouseStackedSeries(data.warehouse) },
+    {
+      id: "warehouseAvg",
+      label: "Avg Spend per Trip",
+      builder: (data) => buildAverageSeries(data.warehouse, (entry) => entry.spent, (entry) => entry.trips, formatMoney)
+    }
+  ],
+  online: [
+    { id: "onlineSpent", label: "Monthly Spend", builder: (data) => buildSimpleSeries(data.online, (entry) => entry.spent, formatMoney) },
+    {
+      id: "onlineOrders",
+      label: "Orders per Month",
+      builder: (data) =>
+        buildSimpleSeries(data.online, (entry) => entry.orders, formatNumber, { integerTicks: true })
+    },
+    {
+      id: "onlineItems",
+      label: "Items per Month",
+      builder: (data) =>
+        buildSimpleSeries(data.online, (entry) => entry.items, formatNumber, { integerTicks: true })
+    },
+    {
+      id: "onlineAvg",
+      label: "Avg Spend per Order",
+      builder: (data) => buildAverageSeries(data.online, (entry) => entry.spent, (entry) => entry.orders, formatMoney)
+    }
+  ],
+  gas: [
+    { id: "gasSpent", label: "Monthly Spend", builder: (data) => buildSimpleSeries(data.gas, (entry) => entry.spent, formatMoney) },
+    {
+      id: "gasTrips",
+      label: "Refuels per Month",
+      builder: (data) =>
+        buildSimpleSeries(data.gas, (entry) => entry.trips, formatNumber, { integerTicks: true })
+    },
+    {
+      id: "gasAvgPrice",
+      label: "Avg Price / Gallon",
+      builder: (data) =>
+        buildAverageSeries(
+          data.gas,
+          (entry) => entry.spent,
+          (entry) => entry.totalGallons,
+          formatMoney
+        )
+    },
+    { id: "gasGallons", label: "Gallons per Month", builder: (data) => buildSimpleSeries(data.gas, (entry) => entry.totalGallons, formatNumber) },
+    {
+      id: "gasAvgGallons",
+      label: "Avg Gallons / Trip",
+      builder: (data) =>
+        buildAverageSeries(
+          data.gas,
+          (entry) => entry.totalGallons,
+          (entry) => entry.trips,
+          (value) => formatDecimal(value, 1)
+        )
+    },
+    { id: "gasLocations", label: "Locations Visited", builder: (data) => buildWarehouseStackedSeries(data.gas) }
+  ]
+};
 
-  const labels = entries.map(([m]) => m);
-  const data = entries.map(([, v]) => v);
+function setMetricsChartData(data) {
+  chartState.data = data;
+  if (!chartState.canvas || !chartState.ctx || !chartState.controls) return;
+  updateChartControls();
+}
 
-  const devicePixelRatio = window.devicePixelRatio || 1;
-  const displayWidth = canvas.clientWidth || 600;
-  const displayHeight = canvas.clientHeight || 360;
-  canvas.width = displayWidth * devicePixelRatio;
-  canvas.height = displayHeight * devicePixelRatio;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.scale(devicePixelRatio, devicePixelRatio);
-  ctx.clearRect(0, 0, displayWidth, displayHeight);
-
-  if (!data.length) {
-    ctx.fillStyle = "#9ca3af";
-    ctx.font = "14px 'Segoe UI', sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("No monthly data yet.", displayWidth / 2, displayHeight / 2);
+function updateChartControls() {
+  if (!chartState.canvas || !chartState.ctx || !chartState.controls) return;
+  const options = CHART_METRICS[activeTab] || [];
+  if (!chartState.data || !options.length) {
+    if (chartState.controls) {
+      chartState.controls.innerHTML = "";
+    }
+    drawNoChartData("No chart data available.");
     return;
   }
 
-  const padding = 40;
-  const chartHeight = displayHeight - padding * 2;
-  const chartWidth = displayWidth - padding * 2;
-  const slotWidth = chartWidth / data.length;
-  const barWidth = Math.max(slotWidth * 0.6, 8);
-  const maxValue = Math.max(...data, 1);
+  chartState.controls.innerHTML = "";
+  options.forEach((option) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = option.label;
+    btn.className = "chart-control-button";
+    if (chartState.currentMetric[activeTab] === option.id) {
+      btn.classList.add("active");
+    }
+    btn.addEventListener("click", () => {
+      if (chartState.currentMetric[activeTab] !== option.id) {
+        chartState.currentMetric[activeTab] = option.id;
+        updateChartControls();
+      }
+    });
+    chartState.controls.appendChild(btn);
+  });
+
+  if (chartState.subtitle) {
+    chartState.subtitle.textContent =
+      CHART_SUBTITLES[activeTab] || "Metrics reflect the current filters.";
+  }
+
+  renderMetricsChart();
+}
+
+function renderMetricsChart() {
+  if (!chartState.canvas || !chartState.ctx || !chartState.data) return;
+  hideChartTooltip();
+  chartState.hitRegions = [];
+  const options = CHART_METRICS[activeTab] || [];
+  if (!options.length) {
+    drawNoChartData("No chart data available.");
+    return;
+  }
+  const currentId = chartState.currentMetric[activeTab] || options[0].id;
+  let selected = options.find((opt) => opt.id === currentId);
+  if (!selected) {
+    selected = options[0];
+    chartState.currentMetric[activeTab] = selected.id;
+  }
+  const dataset = selected.builder(chartState.data);
+  if (!dataset || !dataset.labels || !dataset.labels.length) {
+    drawNoChartData("Not enough data for this view.");
+    return;
+  }
+  drawChartDataset(dataset);
+}
+
+function buildMonthlyDataset(monthlyWarehouseMap, monthlyOnlineMap, monthlyGasMap) {
+  const warehouse = normalizeWarehouseMonthly(monthlyWarehouseMap);
+  const online = normalizeOnlineMonthly(monthlyOnlineMap);
+  const gas = normalizeGasMonthly(monthlyGasMap);
+  const all = buildAllMonthly(warehouse, online, gas);
+  return { warehouse, online, gas, all };
+}
+
+function normalizeWarehouseMonthly(map) {
+  if (!map) return [];
+  return Array.from(map.entries())
+    .map(([month, data]) => ({
+      month,
+      label: formatMonthLabel(month),
+      spent: data.spent || 0,
+      trips: data.trips || 0,
+      items: data.items || 0,
+      locations: data.locations ? new Map(data.locations) : new Map()
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+}
+
+function normalizeOnlineMonthly(map) {
+  if (!map) return [];
+  return Array.from(map.entries())
+    .map(([month, data]) => ({
+      month,
+      label: formatMonthLabel(month),
+      spent: data.spent || 0,
+      orders: data.orders || 0,
+      items: data.items || 0
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+}
+
+function normalizeGasMonthly(map) {
+  if (!map) return [];
+  return Array.from(map.entries())
+    .map(([month, data]) => ({
+      month,
+      label: formatMonthLabel(month),
+      spent: data.spent || 0,
+      trips: data.trips || 0,
+      totalGallons: data.totalGallons || 0,
+      locations: data.locations ? new Map(data.locations) : new Map()
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+}
+
+function buildAllMonthly(warehouseEntries, onlineEntries, gasEntries) {
+  const combined = new Map();
+  const ensureEntry = (month, label) => {
+    let entry = combined.get(month);
+    if (!entry) {
+      entry = {
+        month,
+        label,
+        spent: 0,
+        trips: 0,
+        items: 0,
+        locations: new Map()
+      };
+      combined.set(month, entry);
+    }
+    return entry;
+  };
+
+  warehouseEntries.forEach((entry) => {
+    const combinedEntry = ensureEntry(entry.month, entry.label);
+    combinedEntry.spent += entry.spent || 0;
+    combinedEntry.trips += entry.trips || 0;
+    combinedEntry.items += entry.items || 0;
+    entry.locations?.forEach((count, loc) => {
+      combinedEntry.locations.set(loc, (combinedEntry.locations.get(loc) || 0) + count);
+    });
+  });
+
+  onlineEntries.forEach((entry) => {
+    const combinedEntry = ensureEntry(entry.month, entry.label);
+    combinedEntry.spent += entry.spent || 0;
+    combinedEntry.trips += entry.orders || 0;
+    combinedEntry.items += entry.items || 0;
+  });
+
+  gasEntries.forEach((entry) => {
+    const combinedEntry = ensureEntry(entry.month, entry.label);
+    combinedEntry.spent += entry.spent || 0;
+    combinedEntry.trips += entry.trips || 0;
+    combinedEntry.items += 0;
+    combinedEntry.gasGallons = (combinedEntry.gasGallons || 0) + (entry.totalGallons || 0);
+  });
+
+  return Array.from(combined.values()).sort((a, b) => a.month.localeCompare(b.month));
+}
+
+function buildSimpleSeries(entries, valueFn, formatter, options = {}) {
+  if (!entries || !entries.length) return null;
+  return {
+    labels: entries.map((entry) => entry.label),
+    values: entries.map((entry) => valueFn(entry) || 0),
+    formatValue: formatter || formatNumber,
+    integerTicks: Boolean(options.integerTicks)
+  };
+}
+
+function buildAverageSeries(entries, numeratorFn, denominatorFn, formatter) {
+  if (!entries || !entries.length) return null;
+  return {
+    labels: entries.map((entry) => entry.label),
+    values: entries.map((entry) => {
+      const numerator = numeratorFn(entry) || 0;
+      const denominator = denominatorFn(entry) || 0;
+      return denominator > 0 ? numerator / denominator : 0;
+    }),
+    formatValue: formatter || formatDecimal
+  };
+}
+
+function buildWarehouseStackedSeries(entries) {
+  if (!entries || !entries.length) return null;
+  const totals = new Map();
+  entries.forEach((entry) => {
+    entry.locations?.forEach((count, loc) => {
+      totals.set(loc, (totals.get(loc) || 0) + count);
+    });
+  });
+  if (!totals.size) return null;
+  const topLocations = Array.from(totals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([loc]) => loc);
+  const includeOther = totals.size > topLocations.length;
+  const labels = entries.map((entry) => entry.label);
+  const series = [];
+  topLocations.forEach((loc, idx) => {
+    series.push({
+      label: loc,
+      color: STACK_COLORS[idx % STACK_COLORS.length],
+      values: entries.map((entry) => (entry.locations?.get(loc) || 0))
+    });
+  });
+  if (includeOther) {
+    series.push({
+      label: "Other",
+      color: STACK_COLORS[topLocations.length % STACK_COLORS.length],
+      values: entries.map((entry) => {
+        const total = Array.from(entry.locations?.values() || []).reduce((sum, val) => sum + val, 0);
+        const topSum = topLocations.reduce(
+          (sum, loc) => sum + (entry.locations?.get(loc) || 0),
+          0
+        );
+        return Math.max(total - topSum, 0);
+      })
+    });
+  }
+  if (!series.length) return null;
+  return {
+    labels,
+    series,
+    stacked: true,
+    formatValue: formatNumber,
+    integerTicks: true
+  };
+}
+
+function drawChartDataset(dataset) {
+  if (dataset.stacked) {
+    drawStackedChart(dataset);
+  } else {
+    drawBarChart(dataset);
+  }
+}
+
+function drawBarChart(dataset) {
+  const canvas = chartState.canvas;
+  const ctx = chartState.ctx;
+  if (!canvas || !ctx) return;
+  const labels = dataset.labels || [];
+  const values = dataset.values || [];
+  const formatValue = dataset.formatValue || formatNumber;
+  const integerTicks = Boolean(dataset.integerTicks);
+  const width = canvas.clientWidth || 800;
+  const height = canvas.clientHeight || 320;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, width, height);
+
+  if (!values.length) {
+    drawNoChartData("Not enough data for this view.");
+    return;
+  }
+
+  const padding = { top: 20, right: 20, bottom: 50, left: 60 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const rawMax = Math.max(...values, 1);
+  const tickCount = 4;
+  const tickStep = integerTicks
+    ? Math.max(1, Math.ceil(rawMax / tickCount))
+    : rawMax / tickCount;
+  const maxValue = integerTicks ? tickStep * tickCount : rawMax;
+  const slot = chartWidth / values.length;
+  const barWidth = Math.max(slot * 0.6, 14);
 
   ctx.strokeStyle = "#d1d5db";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(padding, padding);
-  ctx.lineTo(padding, displayHeight - padding);
-  ctx.lineTo(displayWidth - padding, displayHeight - padding);
+  ctx.moveTo(padding.left, padding.top);
+  ctx.lineTo(padding.left, height - padding.bottom);
+  ctx.lineTo(width - padding.right, height - padding.bottom);
   ctx.stroke();
 
-  const tickCount = 4;
   ctx.fillStyle = "#6b7280";
   ctx.font = "11px 'Segoe UI', sans-serif";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
   for (let i = 0; i <= tickCount; i++) {
-    const value = (maxValue / tickCount) * i;
-    const y =
-      displayHeight - padding - (i / tickCount) * chartHeight;
-    ctx.fillText(formatMoney(value), padding - 6, y);
-    ctx.strokeStyle = "rgba(209,213,219,0.4)";
+    const value = tickStep * i;
+    const y = height - padding.bottom - (value / maxValue) * chartHeight;
+    ctx.fillText(formatValue(value), padding.left - 6, y);
+    ctx.strokeStyle = "rgba(209,213,219,0.5)";
     ctx.beginPath();
-    ctx.moveTo(padding, y);
-    ctx.lineTo(displayWidth - padding, y);
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(width - padding.right, y);
     ctx.stroke();
   }
 
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  ctx.fillStyle = "#111827";
-  data.forEach((value, idx) => {
+  labels.forEach((label, idx) => {
+    const value = values[idx] || 0;
     const barHeight = (value / maxValue) * chartHeight;
-    const x =
-      padding +
-      idx * slotWidth +
-      (slotWidth - barWidth) / 2;
-    const y = displayHeight - padding - barHeight;
-
+    const x = padding.left + idx * slot + (slot - barWidth) / 2;
+    const y = height - padding.bottom - barHeight;
     ctx.fillStyle = "#2563eb";
     ctx.fillRect(x, y, barWidth, barHeight);
-
+    if (barHeight > 0) {
+      chartState.hitRegions.push({
+        x,
+        y,
+        width: barWidth,
+        height: barHeight,
+        label,
+        formattedValue: formatValue(value)
+      });
+    }
     ctx.fillStyle = "#111827";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
     ctx.font = "11px 'Segoe UI', sans-serif";
-    ctx.fillText(labels[idx], x + barWidth / 2, displayHeight - padding + 6);
+    ctx.fillText(label, x + barWidth / 2, height - padding.bottom + 6);
   });
 }
 
-function applyFilterAndRender() {
-  const filteredReceipts = filterReceipts(storedReceipts);
-  const filteredOnlineOrders = filterOnlineOrders(storedOnlineOrders);
-  handleData(filteredReceipts, filteredOnlineOrders);
-}
+function drawStackedChart(dataset) {
+  const canvas = chartState.canvas;
+  const ctx = chartState.ctx;
+  if (!canvas || !ctx) return;
+  const labels = dataset.labels || [];
+  const series = dataset.series || [];
+  const formatValue = dataset.formatValue || formatNumber;
+  const integerTicks = Boolean(dataset.integerTicks);
+  const width = canvas.clientWidth || 800;
+  const height = canvas.clientHeight || 320;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, width, height);
 
-function setData(newReceipts, newWarehouseDetails, newOnlineOrders, newOnlineOrderDetails) {
-  storedReceipts = Array.isArray(newReceipts) ? newReceipts : [];
-  storedWarehouseDetails =
-    newWarehouseDetails && typeof newWarehouseDetails === "object"
-      ? newWarehouseDetails
-      : {};
-  storedOnlineOrders = Array.isArray(newOnlineOrders) ? newOnlineOrders : [];
-  storedOnlineOrderDetails =
-    newOnlineOrderDetails && typeof newOnlineOrderDetails === "object"
-      ? newOnlineOrderDetails
-      : {};
-  const bounds = getCombinedBounds(storedReceipts, storedOnlineOrders);
-  filterState.customStart = bounds.start ? formatInputDate(bounds.start) : null;
-  filterState.customEnd = bounds.end ? formatInputDate(bounds.end) : null;
-  updateCustomDateInputs(bounds);
-  populateMonthOptions(storedReceipts, storedOnlineOrders);
-  applyFilterAndRender();
-}
-
-function handleData(receipts, onlineOrders) {
-  const { itemStats, monthlyTotals, summary, gasStats, warehouseVisits } =
-    processReceipts(receipts);
-  const onlineData = processOnlineOrders(onlineOrders);
-  summary.onlineOrderCount = onlineData.totalOrders;
-  summary.onlineOrderTotal = onlineData.totalSpent;
-
-  renderSummary(summary, onlineData, gasStats, warehouseVisits);
-  if (latestSummaryPayload) {
-    latestSummaryPayload.itemStats = itemStats;
-    latestSummaryPayload.onlineOrders = onlineOrders;
+  if (!labels.length || !series.length) {
+    drawNoChartData("Not enough data for this view.");
+    return;
   }
-  renderAllVisits(warehouseVisits, onlineData.rows, gasStats.trips);
-  renderWarehouseVisits(warehouseVisits);
-  renderTopItemSections(itemStats, onlineData, onlineOrders);
-  renderOnlineOrders(onlineData.rows);
-  renderGasTrips(gasStats);
-  renderMonthlyChart(monthlyTotals);
+
+  const totals = labels.map((_, idx) =>
+    series.reduce((sum, serie) => sum + (serie.values[idx] || 0), 0)
+  );
+  const rawMax = Math.max(...totals, 1);
+  const tickCount = 4;
+  const tickStep = integerTicks
+    ? Math.max(1, Math.ceil(rawMax / tickCount))
+    : rawMax / tickCount;
+  const maxValue = integerTicks ? tickStep * tickCount : rawMax;
+
+  const padding = { top: 20, right: 20, bottom: 60, left: 70 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const slot = chartWidth / labels.length;
+  const barWidth = Math.max(slot * 0.6, 14);
+
+  ctx.strokeStyle = "#d1d5db";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padding.left, padding.top);
+  ctx.lineTo(padding.left, height - padding.bottom);
+  ctx.lineTo(width - padding.right, height - padding.bottom);
+  ctx.stroke();
+
+  ctx.fillStyle = "#6b7280";
+  ctx.font = "11px 'Segoe UI', sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (let i = 0; i <= tickCount; i++) {
+    const value = tickStep * i;
+    const y = height - padding.bottom - (value / maxValue) * chartHeight;
+    ctx.fillText(formatValue(value), padding.left - 8, y);
+    ctx.strokeStyle = "rgba(209,213,219,0.4)";
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(width - padding.right, y);
+    ctx.stroke();
+  }
+
+  labels.forEach((label, idx) => {
+    let currentY = height - padding.bottom;
+    series.forEach((serie) => {
+      const value = serie.values[idx] || 0;
+      if (value <= 0) return;
+      const barHeight = (value / maxValue) * chartHeight;
+      ctx.fillStyle = serie.color;
+      const x = padding.left + idx * slot + (slot - barWidth) / 2;
+      const y = currentY - barHeight;
+      ctx.fillRect(x, y, barWidth, barHeight);
+      chartState.hitRegions.push({
+        x,
+        y,
+        width: barWidth,
+        height: barHeight,
+        label,
+        seriesLabel: serie.label,
+        formattedValue: formatValue(value)
+      });
+      currentY = y;
+    });
+    ctx.fillStyle = "#111827";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.font = "11px 'Segoe UI', sans-serif";
+    ctx.fillText(label, padding.left + idx * slot + barWidth / 2, height - padding.bottom + 8);
+  });
+
+  drawLegend(series);
+}
+
+function drawLegend(series) {
+  const canvas = chartState.canvas;
+  const ctx = chartState.ctx;
+  if (!canvas || !ctx || !series.length) return;
+  ctx.font = "11px 'Segoe UI', sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  let x = canvas.clientWidth - 140;
+  let y = 16;
+  series.forEach((serie) => {
+    ctx.fillStyle = serie.color;
+    ctx.fillRect(x, y - 5, 10, 10);
+    ctx.fillStyle = "#111827";
+    ctx.fillText(serie.label, x + 14, y);
+    y += 16;
+  });
+}
+
+function drawNoChartData(message) {
+  const canvas = chartState.canvas;
+  const ctx = chartState.ctx;
+  if (!canvas || !ctx) return;
+  const width = canvas.clientWidth || 800;
+  const height = canvas.clientHeight || 320;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#9ca3af";
+  ctx.font = "14px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(message, width / 2, height / 2);
+  chartState.hitRegions = [];
+  hideChartTooltip();
+}
+
+function initChartInteractions() {
+  if (!chartState.canvas) return;
+  chartState.canvas.addEventListener("mousemove", handleChartPointerMove);
+  chartState.canvas.addEventListener("mouseleave", () => {
+    hideChartTooltip();
+  });
+}
+
+function handleChartPointerMove(event) {
+  if (!chartState.canvas || !chartState.hitRegions.length) {
+    hideChartTooltip();
+    return;
+  }
+  const rect = chartState.canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const target = findHitRegion(x, y);
+  if (!target) {
+    hideChartTooltip();
+    return;
+  }
+  const lines = [
+    target.seriesLabel
+      ? `${target.label} • ${target.seriesLabel}`
+      : target.label,
+    target.formattedValue || formatNumber(target.value || 0)
+  ];
+  showChartTooltip(event.clientX, event.clientY, lines);
+}
+
+function findHitRegion(x, y) {
+  for (let i = chartState.hitRegions.length - 1; i >= 0; i -= 1) {
+    const region = chartState.hitRegions[i];
+    if (
+      x >= region.x &&
+      x <= region.x + region.width &&
+      y >= region.y &&
+      y <= region.y + region.height
+    ) {
+      return region;
+      }
+  }
+  return null;
+}
+
+function showChartTooltip(clientX, clientY, lines) {
+  const tooltip = chartState.tooltipEl;
+  const canvas = chartState.canvas;
+  if (!tooltip || !canvas) return;
+  tooltip.innerHTML = lines.map((line) => escapeHtml(line)).join("<br/>");
+  const wrapperRect = canvas.parentElement.getBoundingClientRect();
+  let left = clientX - wrapperRect.left + 12;
+  let top = clientY - wrapperRect.top - 12;
+  const tooltipRect = tooltip.getBoundingClientRect();
+  if (left + tooltipRect.width > wrapperRect.width) {
+    left = wrapperRect.width - tooltipRect.width - 8;
+  }
+  if (top < 0) {
+    top = 0;
+  }
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+  tooltip.classList.add("show");
+}
+
+function hideChartTooltip() {
+  const tooltip = chartState.tooltipEl;
+  if (!tooltip) return;
+  tooltip.classList.remove("show");
+}
+
+function formatNumber(value) {
+  return (Number(value) || 0).toLocaleString();
+}
+
+function formatDecimal(value, decimals = 1) {
+  const num = Number(value) || 0;
+  return num.toFixed(decimals);
 }
 
 // File upload removed; receipts now flow directly from the extension.
@@ -1551,12 +2307,20 @@ if (hasChrome) {
 }
 function renderTopItemSections(itemStats, onlineData, filteredOnlineOrders) {
   if (!topItemsSection) return;
-  if (activeTab === "gas") {
-    topItemsSection.style.display = "none";
+  const isGasTab = activeTab === "gas";
+  topItemsSection.style.display = isGasTab ? "none" : "grid";
+  if (topItemsSecondarySection) {
+    topItemsSecondarySection.style.display = isGasTab ? "none" : "grid";
+  }
+  if (isGasTab) {
+    clearTableBody("mostTotalSpentBody");
+    clearTableBody("priceIncreaseBody");
+    clearTableBody("mostExpensiveBody");
+    clearTableBody("mostPurchasedBody");
     return;
   }
-  topItemsSection.style.display = "grid";
 
+  const nameCharLimit = activeTab === "online" ? 15 : null;
   let combinedStats = new Map();
   if (activeTab === "online") {
     combinedStats = buildOnlineItemStats(filteredOnlineOrders, storedOnlineOrderDetails);
@@ -1569,10 +2333,10 @@ function renderTopItemSections(itemStats, onlineData, filteredOnlineOrders) {
     );
   }
 
-  renderMostTotalSpent(combinedStats);
-  renderMostPurchased(combinedStats);
-  renderMostExpensive(combinedStats);
-  renderPriceIncreases(combinedStats);
+  renderMostTotalSpent(combinedStats, nameCharLimit);
+  renderPriceIncreases(combinedStats, nameCharLimit);
+  renderMostExpensive(combinedStats, nameCharLimit);
+  renderMostPurchased(combinedStats, nameCharLimit);
 }
 function buildOnlineItemStats(orders, detailsMap) {
   const stats = new Map();
@@ -1581,6 +2345,10 @@ function buildOnlineItemStats(orders, detailsMap) {
     detailsMap && typeof detailsMap === "object" ? detailsMap : Object.create(null);
 
   orders.forEach((order) => {
+    const orderTotal = Number(order.orderTotal ?? order.total ?? 0);
+    if (orderTotal < 0) {
+      return;
+    }
     const orderKey = String(
       order.orderNumber || order.sourceOrderNumber || order.orderHeaderId || ""
     ).trim();
