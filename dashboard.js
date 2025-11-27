@@ -33,6 +33,7 @@ const orderDetailsCloseBtn = document.getElementById("orderDetailsClose");
 let activeTab = "all";
 let latestSummaryPayload = null;
 let storedOnlineOrderDetails = {};
+let storedWarehouseDetails = {};
 
 const filterState = {
   preset: presetSelect ? presetSelect.value : "all",
@@ -128,7 +129,8 @@ tabButtons.forEach((button) => {
       );
       renderTopItemSections(
         latestSummaryPayload.itemStats,
-        latestSummaryPayload.onlineData
+        latestSummaryPayload.onlineData,
+        latestSummaryPayload.onlineOrders || []
       );
       renderAllVisits(
         latestSummaryPayload.warehouseVisits,
@@ -140,11 +142,15 @@ tabButtons.forEach((button) => {
 });
 
 if (onlineOrdersBody) {
-  onlineOrdersBody.addEventListener("click", handleOrderRowInteraction);
+  onlineOrdersBody.addEventListener("click", handleVisitRowInteraction);
 }
 
 if (allVisitsBody) {
-  allVisitsBody.addEventListener("click", handleOrderRowInteraction);
+  allVisitsBody.addEventListener("click", handleVisitRowInteraction);
+}
+
+if (warehouseVisitsBody) {
+  warehouseVisitsBody.addEventListener("click", handleVisitRowInteraction);
 }
 
 if (orderDetailsCloseBtn) {
@@ -199,6 +205,22 @@ function parseReceiptDate(receipt) {
 function formatReceiptDate(receipt) {
   const parsed = parseReceiptDate(receipt);
   return parsed ? dateFormatter.format(parsed) : "—";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatItemCell(name, itemNumber) {
+  const displayName = name || "Unnamed Item";
+  const truncated = `<strong class="truncate" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</strong>`;
+  const code = itemNumber ? `#${escapeHtml(itemNumber)}` : "#–";
+  return `${truncated}<br/><span class="status">${code}</span>`;
 }
 
 function buildLocationMapFromVisits(visits) {
@@ -533,7 +555,8 @@ function processReceipts(receipts) {
           receipt.warehouseShortName ||
           receipt.warehouseCity ||
           `Warehouse #${receipt.warehouseNumber || "–"}`,
-        total
+        total,
+        barcode: receipt.transactionBarcode || receipt.transactionNumber || ""
       });
       items.forEach((item) => {
         if (isGasItem(item)) return;
@@ -640,7 +663,14 @@ function processOnlineOrders(orders) {
 }
 
 function renderSummary(summary, onlineData, gasStats, warehouseVisits) {
-  latestSummaryPayload = { summary, onlineData, gasStats, warehouseVisits, itemStats: latestSummaryPayload?.itemStats };
+  latestSummaryPayload = {
+    summary,
+    onlineData,
+    gasStats,
+    warehouseVisits,
+    itemStats: latestSummaryPayload?.itemStats,
+    onlineOrders: latestSummaryPayload?.onlineOrders
+  };
   const summaryGrid = document.getElementById("summaryGrid");
   const topLocationsEl = document.getElementById("globalTopLocations");
   const coverageEl = document.getElementById("dataCoverage");
@@ -835,7 +865,7 @@ function latestDate(dates) {
 
 function buildCoverageText(start, end) {
   if (!start || !end) return "Date coverage unavailable.";
-  return `Showing ${start} → ${end}`;
+  return `Showing data from ${start} → ${end}`;
 }
 
 function renderMostTotalSpent(itemStats) {
@@ -854,8 +884,7 @@ function renderMostTotalSpent(itemStats) {
     tr.appendChild(rankTd);
 
     const itemTd = document.createElement("td");
-    itemTd.innerHTML =
-      `<strong>${row.name}</strong><br/><span class="status">#${row.itemNumber}</span>`;
+    itemTd.innerHTML = formatItemCell(row.name, row.itemNumber);
     tr.appendChild(itemTd);
 
     const totalTd = document.createElement("td");
@@ -892,8 +921,7 @@ function renderMostPurchased(itemStats) {
     tr.appendChild(rankTd);
 
     const itemTd = document.createElement("td");
-    itemTd.innerHTML =
-      `<strong>${row.name}</strong><br/><span class="status">#${row.itemNumber}</span>`;
+    itemTd.innerHTML = formatItemCell(row.name, row.itemNumber);
     tr.appendChild(itemTd);
 
     const timesTd = document.createElement("td");
@@ -949,8 +977,7 @@ function renderMostExpensive(itemStats) {
     tr.appendChild(rankTd);
 
     const itemTd = document.createElement("td");
-    itemTd.innerHTML =
-      `<strong>${row.name}</strong><br/><span class="status">#${row.itemNumber}</span>`;
+    itemTd.innerHTML = formatItemCell(row.name, row.itemNumber);
     tr.appendChild(itemTd);
 
     const avgTd = document.createElement("td");
@@ -1025,8 +1052,7 @@ function renderPriceIncreases(itemStats) {
       tr.appendChild(rankTd);
 
       const itemTd = document.createElement("td");
-      itemTd.innerHTML =
-        `<strong>${row.name}</strong><br/><span class="status">#${row.itemNumber}</span>`;
+      itemTd.innerHTML = formatItemCell(row.name, row.itemNumber);
       tr.appendChild(itemTd);
 
       const minMaxTd = document.createElement("td");
@@ -1149,6 +1175,11 @@ function renderWarehouseVisits(rows) {
     })
     .forEach((visit) => {
       const tr = document.createElement("tr");
+      if (visit.barcode) {
+        tr.dataset.receiptBarcode = visit.barcode;
+        tr.classList.add("clickable-row");
+        tr.title = "Click to view receipt details";
+      }
 
       const dateTd = document.createElement("td");
       dateTd.textContent = visit.date ? dateFormatter.format(visit.date) : "—";
@@ -1229,7 +1260,8 @@ function renderAllVisits(warehouseVisits, onlineOrders, gasTrips) {
       date: visit.date,
       channel: "Warehouse",
       location: visit.location || "—",
-      total: visit.total
+      total: visit.total,
+      receiptBarcode: visit.barcode
     });
   });
 
@@ -1275,6 +1307,10 @@ function renderAllVisits(warehouseVisits, onlineOrders, gasTrips) {
         tr.dataset.orderNumber = entry.orderNumber;
         tr.classList.add("clickable-row");
         tr.title = "Click to view order details";
+      } else if (entry.receiptBarcode) {
+        tr.dataset.receiptBarcode = entry.receiptBarcode;
+        tr.classList.add("clickable-row");
+        tr.title = "Click to view receipt details";
       }
 
       const dateTd = document.createElement("td");
@@ -1384,8 +1420,12 @@ function applyFilterAndRender() {
   handleData(filteredReceipts, filteredOnlineOrders);
 }
 
-function setData(newReceipts, newOnlineOrders, newOnlineOrderDetails) {
+function setData(newReceipts, newWarehouseDetails, newOnlineOrders, newOnlineOrderDetails) {
   storedReceipts = Array.isArray(newReceipts) ? newReceipts : [];
+  storedWarehouseDetails =
+    newWarehouseDetails && typeof newWarehouseDetails === "object"
+      ? newWarehouseDetails
+      : {};
   storedOnlineOrders = Array.isArray(newOnlineOrders) ? newOnlineOrders : [];
   storedOnlineOrderDetails =
     newOnlineOrderDetails && typeof newOnlineOrderDetails === "object"
@@ -1409,10 +1449,11 @@ function handleData(receipts, onlineOrders) {
   renderSummary(summary, onlineData, gasStats, warehouseVisits);
   if (latestSummaryPayload) {
     latestSummaryPayload.itemStats = itemStats;
+    latestSummaryPayload.onlineOrders = onlineOrders;
   }
   renderAllVisits(warehouseVisits, onlineData.rows, gasStats.trips);
   renderWarehouseVisits(warehouseVisits);
-  renderTopItemSections(itemStats, onlineData);
+  renderTopItemSections(itemStats, onlineData, onlineOrders);
   renderOnlineOrders(onlineData.rows);
   renderGasTrips(gasStats);
   renderMonthlyChart(monthlyTotals);
@@ -1422,12 +1463,13 @@ function handleData(receipts, onlineOrders) {
 
 function displayExtensionReceipts(
   receipts,
+  warehouseDetails,
   onlineOrders,
   onlineOrderDetails,
   updatedAt
 ) {
   if (!Array.isArray(receipts) || receipts.length === 0) {
-    setData([], onlineOrders || [], onlineOrderDetails || {});
+    setData([], warehouseDetails || {}, onlineOrders || [], onlineOrderDetails || {});
     statusEl.textContent = "No receipts loaded from extension.";
     statusEl.classList.add("error");
     const rangeEl = document.getElementById("dateRange");
@@ -1442,7 +1484,7 @@ function displayExtensionReceipts(
     : "";
   statusEl.textContent = `Loaded ${receipts.length.toLocaleString()} receipts from extension${timestamp}.`;
   statusEl.classList.remove("error");
-  setData(receipts, onlineOrders || [], onlineOrderDetails || {});
+  setData(receipts, warehouseDetails || {}, onlineOrders || [], onlineOrderDetails || {});
   return true;
 }
 
@@ -1460,6 +1502,7 @@ function loadReceiptsFromStorage() {
     if (!stored) return;
     displayExtensionReceipts(
       stored.receipts,
+      stored.warehouseDetails,
       stored.onlineOrders,
       stored.orderDetails,
       stored.updatedAt
@@ -1477,6 +1520,7 @@ if (hasChrome) {
       if (!newValue) return;
       displayExtensionReceipts(
         newValue.receipts,
+        newValue.warehouseDetails,
         newValue.onlineOrders,
         newValue.orderDetails,
         newValue.updatedAt
@@ -1496,6 +1540,7 @@ if (hasChrome) {
       if (resp) {
         displayExtensionReceipts(
           resp.receipts,
+          resp.warehouseDetails,
           resp.onlineOrders,
           resp.orderDetails,
           resp.updatedAt
@@ -1504,7 +1549,7 @@ if (hasChrome) {
     });
   }
 }
-function renderTopItemSections(itemStats, onlineData) {
+function renderTopItemSections(itemStats, onlineData, filteredOnlineOrders) {
   if (!topItemsSection) return;
   if (activeTab === "gas") {
     topItemsSection.style.display = "none";
@@ -1514,11 +1559,14 @@ function renderTopItemSections(itemStats, onlineData) {
 
   let combinedStats = new Map();
   if (activeTab === "online") {
-    combinedStats = buildOnlineItemStats(onlineData.rows);
+    combinedStats = buildOnlineItemStats(filteredOnlineOrders, storedOnlineOrderDetails);
   } else if (activeTab === "warehouse") {
     combinedStats = itemStats;
   } else {
-    combinedStats = mergeItemStats(itemStats, buildOnlineItemStats(onlineData.rows));
+    combinedStats = mergeItemStats(
+      itemStats,
+      buildOnlineItemStats(filteredOnlineOrders, storedOnlineOrderDetails)
+    );
   }
 
   renderMostTotalSpent(combinedStats);
@@ -1526,23 +1574,39 @@ function renderTopItemSections(itemStats, onlineData) {
   renderMostExpensive(combinedStats);
   renderPriceIncreases(combinedStats);
 }
-function buildOnlineItemStats(rows) {
+function buildOnlineItemStats(orders, detailsMap) {
   const stats = new Map();
-  if (!Array.isArray(rows)) return stats;
-  rows.forEach((order) => {
-    const items = Array.isArray(order.items || order.orderLineItems)
-      ? order.orderLineItems
-      : [];
-    items.forEach((item) => {
-      const key = `${item.itemNumber || item.itemId || order.orderNumber}|online`;
-      const name = `${item.itemDescription || `Order ${order.orderNumber}`}`;
-      const price = Number(item.amount || item.lineTotalAmount || 0);
+  if (!Array.isArray(orders)) return stats;
+  const map =
+    detailsMap && typeof detailsMap === "object" ? detailsMap : Object.create(null);
 
+  orders.forEach((order) => {
+    const orderKey = String(
+      order.orderNumber || order.sourceOrderNumber || order.orderHeaderId || ""
+    ).trim();
+    const detail = orderKey ? map[orderKey] : null;
+    const items = detail
+      ? flattenOrderLineItems(detail)
+      : Array.isArray(order.orderLineItems)
+      ? order.orderLineItems.map((line) => ({
+          itemNumber: line.itemNumber || line.itemId || orderKey,
+          description: line.itemDescription || `Order ${orderKey}`,
+          quantity: 1,
+          price: Number(line.unitPrice || line.amount || 0),
+          total: Number(line.amount || 0)
+        }))
+      : [];
+
+    items.forEach((item) => {
+      const quantity = Number(item.quantity) || 1;
+      const total = Number(item.total) || Number(item.price || 0) * quantity;
+      const perUnit = quantity ? total / quantity : 0;
+      const key = `${item.itemNumber || item.description || orderKey}|online`;
       let stat = stats.get(key);
       if (!stat) {
         stat = {
-          itemNumber: item.itemNumber || item.itemId || order.orderNumber,
-          name: `${name} (Online)`,
+          itemNumber: item.itemNumber || item.description || orderKey,
+          name: `${item.description || "Online Item"} (Online)`,
           totalSpent: 0,
           totalUnits: 0,
           purchases: 0,
@@ -1550,10 +1614,13 @@ function buildOnlineItemStats(rows) {
         };
         stats.set(key, stat);
       }
-      stat.totalSpent += price;
-      stat.totalUnits += 1;
-      stat.purchases += 1;
-      stat.prices.push({ date: order.date || new Date(), price });
+      stat.totalSpent += total;
+      stat.totalUnits += quantity;
+      stat.purchases += quantity;
+      stat.prices.push({
+        date: parseOnlineOrderDate(order) || new Date(),
+        price: perUnit
+      });
     });
   });
 
@@ -1582,12 +1649,18 @@ function mergeItemStats(warehouseStats, onlineStats) {
   return combined;
 }
 
-function handleOrderRowInteraction(event) {
-  const row = event.target.closest("tr[data-order-number]");
+function handleVisitRowInteraction(event) {
+  const row = event.target.closest("tr[data-order-number], tr[data-receipt-barcode]");
   if (!row) return;
   const orderNumber = row.dataset.orderNumber;
-  if (!orderNumber) return;
-  fetchAndDisplayOrderDetails(orderNumber);
+  const receiptBarcode = row.dataset.receiptBarcode;
+  if (orderNumber) {
+    fetchAndDisplayOrderDetails(orderNumber);
+    return;
+  }
+  if (receiptBarcode) {
+    fetchAndDisplayWarehouseDetails(receiptBarcode);
+  }
 }
 
 function openOrderDetailsModal(message) {
@@ -1665,6 +1738,120 @@ function renderOrderDetailsView(detail, fallbackOrderNumber) {
     <div class="order-details-section order-details-items">
       <h4>Items</h4>
       ${itemsHtml}
+    </div>
+  `;
+}
+
+function fetchAndDisplayWarehouseDetails(barcode) {
+  openOrderDetailsModal(`Loading receipt ${barcode}...`);
+  const detail = storedWarehouseDetails
+    ? storedWarehouseDetails[barcode]
+    : null;
+  if (!detail) {
+    if (orderDetailsContent) {
+      orderDetailsContent.innerHTML =
+        "<p class=\"status error\">No receipt details were saved for this visit. Try downloading again.</p>";
+    }
+    return;
+  }
+  renderWarehouseReceiptView(detail, barcode);
+}
+
+function renderWarehouseReceiptView(receipt, fallbackBarcode) {
+  if (!orderDetailsContent) return;
+  if (!receipt) {
+    orderDetailsContent.innerHTML =
+      "<p class=\"status error\">Receipt details are unavailable.</p>";
+    return;
+  }
+  const title = receipt.transactionBarcode || fallbackBarcode || "Warehouse Receipt";
+  const receiptDate = receipt.transactionDateTime
+    ? dateFormatter.format(new Date(receipt.transactionDateTime))
+    : receipt.transactionDate || "—";
+  const location = receipt.warehouseName || receipt.warehouseShortName || "Warehouse";
+  const meta = [
+    { label: "Receipt #", value: title },
+    { label: "Warehouse", value: location },
+    { label: "Date", value: receiptDate },
+    { label: "Register", value: receipt.registerNumber || "—" },
+    { label: "Operator", value: receipt.operatorNumber || "—" },
+    { label: "Total", value: formatMoney(Number(receipt.total) || 0) },
+    { label: "Subtotal", value: formatMoney(Number(receipt.subTotal) || 0) },
+    { label: "Taxes", value: formatMoney(Number(receipt.taxes) || 0) }
+  ];
+
+  const metaHtml = meta
+    .map(
+      (entry) => `
+        <div>
+          <span class="label">${entry.label}</span>
+          <span class="value">${entry.value}</span>
+        </div>
+      `
+    )
+    .join("");
+
+  const items = Array.isArray(receipt.itemArray) ? receipt.itemArray : [];
+  const itemsRows = items
+    .map(
+      (item, idx) => `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>
+            <strong>${item.itemDescription01 || item.itemDescription02 || "Item"}</strong><br/>
+            <span class="status">#${item.itemNumber || "–"}</span>
+          </td>
+          <td>${Number(item.unit || item.fuelUnitQuantity || 0).toLocaleString()}</td>
+          <td class="money">${formatMoney(item.itemUnitPriceAmount || (item.amount || 0))}</td>
+          <td class="money">${formatMoney(item.amount || 0)}</td>
+        </tr>
+      `
+    )
+    .join("");
+
+  const tenders = Array.isArray(receipt.tenderArray) ? receipt.tenderArray : [];
+  const tenderHtml = tenders.length
+    ? tenders
+        .map(
+          (tender) => `
+            <li>
+              <span>${tender.tenderDescription || tender.tenderTypeName || "Payment"}</span>
+              <span>${formatMoney(Number(tender.amountTender) || 0)}</span>
+            </li>
+          `
+        )
+        .join("")
+    : '<li><span>No tenders recorded.</span></li>';
+
+  orderDetailsContent.innerHTML = `
+    <h3>Warehouse Receipt</h3>
+    <div class="order-details-meta">
+      ${metaHtml}
+    </div>
+    <div class="order-details-section order-details-items">
+      <h4>Items</h4>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Qty</th>
+              <th>Unit Price</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRows || '<tr><td colspan="5" class="status">No items recorded.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="order-details-section">
+      <h4>Payments</h4>
+      <ul class="charges-list">
+        ${tenderHtml}
+      </ul>
     </div>
   `;
 }
@@ -1761,6 +1948,7 @@ function flattenOrderLineItems(order) {
         Number(line.merchandiseTotalAmount) ||
         (quantity && price ? quantity * price : 0);
       items.push({
+        itemNumber: line.itemNumber || line.itemId || line.sourceLineItemId || "",
         description:
           line.itemDescription ||
           line.sourceItemDescription ||

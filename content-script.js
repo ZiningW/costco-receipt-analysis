@@ -68,13 +68,19 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
       };
       reportProgress("Fetching warehouse receipts...");
 
-      const { receipts, onlineOrders, orderDetails } = await downloadReceipts(reportProgress);
+      const {
+        receipts,
+        warehouseDetails,
+        onlineOrders,
+        orderDetails
+      } = await downloadReceipts(reportProgress);
 
       if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage(
           {
             type: "storeReceipts",
             receipts,
+            warehouseDetails,
             onlineOrders,
             orderDetails
           },
@@ -91,7 +97,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
       reportProgress("Opening dashboard...");
 
       alert(
-        `Fetched ${receipts.length} warehouse/gas receipts, ${onlineOrders.length} online orders, and ${Object.keys(orderDetails).length} order details. Opening dashboard...`
+        `Fetched ${receipts.length} warehouse/gas receipts, ${onlineOrders.length} online orders, ${Object.keys(warehouseDetails).length} warehouse receipt details, and ${Object.keys(orderDetails).length} online order details. Opening dashboard...`
       );
 
       btn.textContent = "View Spending Summary";
@@ -578,6 +584,21 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
     });
   }
 
+  function buildWarehouseDetailMap(receipts) {
+    const details = {};
+    (receipts || []).forEach((receipt) => {
+      if (!receipt) return;
+      const key = String(
+        receipt.transactionBarcode || receipt.transactionNumber || ""
+      ).trim();
+      if (!key) return;
+      if (!details[key]) {
+        details[key] = receipt;
+      }
+    });
+    return details;
+  }
+
   async function downloadReceipts(reportProgress) {
     if (typeof reportProgress === "function") {
       reportProgress("Fetching warehouse receipts...");
@@ -589,6 +610,7 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
     const startDateStr = formatDateISO(startDate);
 
     const receipts = await listReceipts(startDateStr, endDateStr);
+    const warehouseDetails = buildWarehouseDetailMap(receipts);
     if (typeof reportProgress === "function") {
       reportProgress("Fetching online orders...");
     }
@@ -598,9 +620,11 @@ console.log("Costco Receipts Extension: content script loaded on", location.href
       message: "Costco Receipts Extension: fetch complete",
       receiptCount: receipts.length,
       onlineOrderCount: onlineOrders.length,
+      warehouseDetailCount: Object.keys(warehouseDetails).length,
       orderDetailsCount: Object.keys(orderDetails).length,
       firstOnlineOrder: onlineOrders[0]
     });
-    return { receipts, onlineOrders, orderDetails };
+    return { receipts, warehouseDetails, onlineOrders, orderDetails };
   }
+
 })();

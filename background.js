@@ -2,14 +2,16 @@
 
 const RECEIPT_STORAGE_KEY = "costcoReceiptsData";
 let lastReceipts = [];
+let lastWarehouseDetails = {};
 let lastOnlineOrders = [];
 let lastOnlineOrderDetails = {};
 let lastUpdated = null;
 
-function persistReceipts(receipts, onlineOrders, orderDetails) {
+function persistReceipts(receipts, warehouseDetails, onlineOrders, orderDetails) {
   return new Promise((resolve) => {
     const payload = {
       receipts,
+      warehouseDetails,
       onlineOrders,
       orderDetails,
       updatedAt: Date.now()
@@ -34,6 +36,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "storeReceipts") {
     lastReceipts = Array.isArray(message.receipts) ? message.receipts : [];
+    lastWarehouseDetails =
+      message.warehouseDetails && typeof message.warehouseDetails === "object"
+        ? message.warehouseDetails
+        : {};
     lastOnlineOrders = Array.isArray(message.onlineOrders)
       ? message.onlineOrders
       : [];
@@ -45,6 +51,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     persistReceipts(
       lastReceipts,
+      lastWarehouseDetails,
       lastOnlineOrders,
       lastOnlineOrderDetails
     ).then((stored) => {
@@ -75,6 +82,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const receipts = Array.isArray(stored?.receipts)
         ? stored.receipts
         : lastReceipts;
+      const warehouseDetails =
+        stored?.warehouseDetails && typeof stored.warehouseDetails === "object"
+          ? stored.warehouseDetails
+          : lastWarehouseDetails;
       const onlineOrders = Array.isArray(stored?.onlineOrders)
         ? stored.onlineOrders
         : lastOnlineOrders;
@@ -86,6 +97,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       sendResponse({
         receipts,
+        warehouseDetails,
         onlineOrders,
         orderDetails,
         updatedAt
