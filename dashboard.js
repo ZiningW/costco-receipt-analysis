@@ -24,6 +24,7 @@ const customStartInput = document.getElementById("customStart");
 const customEndInput = document.getElementById("customEnd");
 const monthSelect = document.getElementById("monthSelect");
 const downloadJsonBtn = document.getElementById("downloadJsonBtn");
+const downloadPngBtn = document.getElementById("downloadPngBtn");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabContents = document.querySelectorAll(".tab-content");
 const topItemsSection = document.getElementById("topItemsSection");
@@ -132,6 +133,12 @@ if (downloadJsonBtn) {
 }
 updateCustomInputsDisabled();
 initChartInteractions();
+
+if (downloadPngBtn) {
+  downloadPngBtn.addEventListener("click", () => {
+    downloadSummaryPng();
+  });
+}
 
 const tabModeMap = {
   allTab: "all",
@@ -2273,6 +2280,433 @@ function hideChartTooltip() {
   const tooltip = chartState.tooltipEl;
   if (!tooltip) return;
   tooltip.classList.remove("show");
+}
+
+function buildCoverageForTab(tab, summary, onlineData, gasStats, warehouseLocations, onlineLocations, gasLocations) {
+  const { coverage } = buildSummaryCards(
+    tab,
+    summary,
+    onlineData,
+    gasStats,
+    warehouseLocations,
+    onlineLocations,
+    gasLocations
+  );
+  return coverage;
+}
+
+function buildCombinedItemStatsForTab(tab, itemStats, onlineOrders, onlineDetails) {
+  if (tab === "online") {
+    return buildOnlineItemStats(onlineOrders, onlineDetails);
+  }
+  if (tab === "warehouse") {
+    return itemStats || new Map();
+  }
+  return mergeItemStats(
+    itemStats,
+    buildOnlineItemStats(onlineOrders, onlineDetails)
+  );
+}
+
+function getTopPurchasedItems(statsMap, limit = 3) {
+  if (!statsMap || !statsMap.size) return [];
+  return Array.from(statsMap.values())
+    .sort((a, b) => (b.purchases || 0) - (a.purchases || 0))
+    .slice(0, limit);
+}
+
+function getTopExpensiveItems(statsMap, limit = 3) {
+  if (!statsMap || !statsMap.size) return [];
+  return Array.from(statsMap.values())
+    .filter((s) => s.purchases >= 1)
+    .map((s) => ({
+      ...s,
+      avgPrice: s.totalSpent && s.purchases ? s.totalSpent / s.purchases : 0
+    }))
+    .sort((a, b) => b.avgPrice - a.avgPrice)
+    .slice(0, limit);
+}
+
+function getTopPriceIncreases(statsMap, limit = 3) {
+  if (!statsMap || !statsMap.size) return [];
+  const rows = [];
+  statsMap.forEach((s) => {
+    if (!s.prices || s.prices.length < 2) return;
+    let min = Infinity;
+    let max = -Infinity;
+    s.prices.forEach((p) => {
+      if (p.price < min) min = p.price;
+      if (p.price > max) max = p.price;
+    });
+    if (min <= 0 || max <= min) return;
+    rows.push({
+      ...s,
+      min,
+      max,
+      increase: max - min
+    });
+  });
+  return rows.sort((a, b) => b.increase - a.increase).slice(0, limit);
+}
+
+function getTopSpentItems(statsMap, limit = 3) {
+  if (!statsMap || !statsMap.size) return [];
+  return Array.from(statsMap.values())
+    .sort((a, b) => (b.totalSpent || 0) - (a.totalSpent || 0))
+    .slice(0, limit);
+}
+
+function getTopWarehouseLocation(visits) {
+  const map = buildLocationMapFromVisits(visits);
+  if (!map.size) return null;
+  return Array.from(map.entries()).sort((a, b) => b[1] - a[1])[0];
+}
+
+function getBiggestTrip(warehouseVisits, onlineRows, gasTrips) {
+  let max = { label: "None", total: 0 };
+  const consider = (label, total) => {
+    if (total > max.total) max = { label, total };
+  };
+  (warehouseVisits || []).forEach((visit) => {
+    const total = Number(visit.total) || 0;
+    if (total > 0) consider(visit.location || "Warehouse", total);
+  });
+  (onlineRows || []).forEach((order) => {
+    const total = Number(order.total) || 0;
+    if (total > 0) consider(order.location || "Online", total);
+  });
+  (gasTrips || []).forEach((trip) => {
+    const total = Number(trip.totalPrice) || 0;
+    if (total > 0) consider(trip.location || "Gas", total);
+  });
+  return max;
+}
+
+function getBiggestMonth(monthlyData) {
+  if (!monthlyData || !monthlyData.all) return null;
+  const best = monthlyData.all.slice().sort((a, b) => (b.spent || 0) - (a.spent || 0))[0];
+  if (!best || !best.spent) return null;
+  return { label: best.label, total: best.spent };
+}
+
+function truncateName(name, maxLen = 28) {
+  if (!name) return "Item";
+  return name.length > maxLen ? `${name.slice(0, maxLen - 1)}…` : name;
+}
+
+function downloadSummaryPng() {
+  if (!latestSummaryPayload) return;
+  const { summary, onlineData, gasStats, warehouseVisits, itemStats, onlineOrders } = latestSummaryPayload;
+  const warehouseLocations = buildLocationMapFromVisits(warehouseVisits);
+  const onlineLocations = onlineData.locationCounts || new Map();
+  const gasLocations = gasStats?.locationCounts || new Map();
+  const coverage = buildCoverageForTab(
+    activeTab,
+    summary,
+    onlineData,
+    gasStats,
+    warehouseLocations,
+    onlineLocations,
+    gasLocations
+  );
+
+  const netWarehouseSpent = (summary.totalSpent || 0) - (summary.returnAmount || 0);
+  const netOnlineSpent = (onlineData.totalSpent || 0) - (onlineData.returnAmount || 0);
+  let totalTrips = summary.shoppingReceipts + onlineData.totalOrders + gasStats.totalTrips;
+  let totalSpent = netWarehouseSpent + netOnlineSpent + (gasStats.totalCost || 0);
+  if (activeTab === "warehouse") {
+    totalTrips = summary.shoppingReceipts;
+    totalSpent = netWarehouseSpent;
+  } else if (activeTab === "online") {
+    totalTrips = onlineData.totalOrders;
+    totalSpent = netOnlineSpent;
+  } else if (activeTab === "gas") {
+    totalTrips = gasStats.totalTrips;
+    totalSpent = gasStats.totalCost || 0;
+  }
+
+  const combinedStats = buildCombinedItemStatsForTab(
+    activeTab,
+    itemStats,
+    onlineOrders,
+    storedOnlineOrderDetails
+  );
+  const topPurchased = getTopPurchasedItems(combinedStats, 3);
+  const topExpensive = getTopExpensiveItems(combinedStats, 3);
+  const priceIncreaseItems = getTopPriceIncreases(combinedStats, 3);
+  const mostSpentItems = getTopSpentItems(combinedStats, 3);
+  const topWarehouse = getTopWarehouseLocation(warehouseVisits);
+  const biggestTrip = getBiggestTrip(warehouseVisits, onlineData.rows, gasStats.trips);
+  const biggestMonth = getBiggestMonth(latestSummaryPayload.monthlyData || {});
+
+  const canvas = document.createElement("canvas");
+  const width = 1080;
+  const minHeight = 1200;
+  canvas.width = width;
+  canvas.height = minHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const drawBackground = (h) => {
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, "#0b1224");
+    grad.addColorStop(1, "#16284d");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, h);
+
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.beginPath();
+    ctx.ellipse(width * 0.2, h * 0.2, 220, 140, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(width * 0.8, h * 0.4, 260, 180, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  const drawHeader = () => {
+    const titleText = "Costco Damages Wrapped";
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "52px 'Segoe UI Semibold', 'Segoe UI', sans-serif";
+    ctx.fillText(titleText, 80, 120);
+    ctx.font = "22px 'Segoe UI', sans-serif";
+    ctx.fillStyle = "#cbd5e1";
+    const tabLabel = activeTab.charAt(0).toUpperCase() + activeTab.slice(1);
+    ctx.fillText(`Tab: ${tabLabel} • ${coverage || "Date range unavailable"}`, 80, 160);
+
+    const pillText = "Spending Highlights";
+    const pillWidth = ctx.measureText(pillText).width + 32;
+    ctx.fillStyle = "rgba(255,255,255,0.14)";
+    ctx.beginPath();
+    ctx.roundRect(80, 182, pillWidth, 34, 17);
+    ctx.fill();
+    ctx.fillStyle = "#e2e8f0";
+    ctx.font = "15px 'Segoe UI Semibold', 'Segoe UI', sans-serif";
+    ctx.fillText(pillText, 98, 206);
+  };
+
+  const cardBaseY = 240;
+  const cardW = 300;
+  const cardH = 130;
+  const gap = 24;
+
+  const drawCard = (title, value, subtitle, x, y, accent) => {
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.strokeStyle = accent || "rgba(255,255,255,0.2)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, cardW, cardH, 16);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = "14px 'Segoe UI', sans-serif";
+    ctx.fillText(title, x + 18, y + 28);
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "26px 'Segoe UI Semibold', 'Segoe UI', sans-serif";
+    ctx.fillText(value, x + 18, y + 60);
+    if (subtitle) {
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "14px 'Segoe UI', sans-serif";
+      ctx.fillText(subtitle, x + 18, y + 86);
+    }
+  };
+
+  let cx = 80;
+  let cy = cardBaseY;
+  drawCard("💰 Total Spent", formatMoney(totalSpent), "Net of returns", cx, cy, "#22d3ee");
+  cx += cardW + gap;
+  drawCard("🛒 Total Trips", totalTrips.toLocaleString(), "All channels", cx, cy, "#a855f7");
+  cx += cardW + gap;
+  const avgPerTrip = totalTrips > 0 ? totalSpent / totalTrips : 0;
+  drawCard("📊 Avg per Trip", formatMoney(avgPerTrip), null, cx, cy, "#f97316");
+
+  cx = 80;
+  cy += cardH + gap;
+  drawCard("⛽ Total Gas Trips", (gasStats.totalTrips || 0).toLocaleString(), null, cx, cy, "#22c55e");
+  cx += cardW + gap;
+  drawCard("🛢️ Total Gallons", formatGallons(gasStats.totalGallons || 0), null, cx, cy, "#22c55e");
+  cx += cardW + gap;
+  drawCard("🍗 Rotisserie", `${(summary.rotisserieCount || 0).toLocaleString()}×`, formatMoney(summary.rotisserieSpent || 0), cx, cy, "#d6a66a");
+
+  cx = 80;
+  cy += cardH + gap;
+  drawCard("📍 Top Warehouse", topWarehouse ? `${truncateName(topWarehouse[0], 24)} • ${topWarehouse[1]}×` : "—", null, cx, cy, "#c084fc");
+  cx += cardW + gap;
+  drawCard("🧾 Biggest Trip", biggestTrip.total ? `${formatMoney(biggestTrip.total)} • ${truncateName(biggestTrip.label, 22)}` : "No trips", null, cx, cy, "#fbbf24");
+  cx += cardW + gap;
+  drawCard("📅 Biggest Month", biggestMonth ? `${biggestMonth.label} • ${formatMoney(biggestMonth.total)}` : "No data", null, cx, cy, "#38bdf8");
+
+  const drawList = (label, items, x, y, w, h, formatter) => {
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.strokeStyle = "rgba(255,255,255,0.2)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 16);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = "16px 'Segoe UI Semibold', 'Segoe UI', sans-serif";
+    ctx.fillText(label, x + 18, y + 28);
+    let offsetY = y + 60;
+    if (!items.length) {
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "14px 'Segoe UI', sans-serif";
+      ctx.fillText("No data", x + 18, offsetY);
+      return;
+    }
+    items.forEach((item, idx) => {
+      const name = item.name || "Item";
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "17px 'Segoe UI Semibold', 'Segoe UI', sans-serif";
+      const truncated = name.length > 36 ? `${name.slice(0, 33)}…` : name;
+      ctx.fillText(`${idx + 1}. ${truncated}`, x + 18, offsetY);
+      ctx.fillStyle = "#cbd5e1";
+      ctx.font = "14px 'Segoe UI', sans-serif";
+      const detail = formatter ? formatter(item) : `${(item.purchases || 0).toLocaleString()}× @ ${formatMoney((item.totalSpent || 0) / Math.max(item.purchases || 1, 1))}`;
+      ctx.fillText(detail, x + 18, offsetY + 18);
+      offsetY += 44;
+    });
+  };
+
+  const listY = cy + cardH + 60;
+  drawList(
+    "🛍️ Top 3 Purchased Items",
+    topPurchased,
+    80,
+    listY,
+    440,
+    240,
+    (item) => `${(item.purchases || 0).toLocaleString()}× • ${formatMoney((item.totalSpent || 0) / Math.max(item.purchases || 1, 1))} avg`
+  );
+  drawList(
+    "💰 Most Total Spent Items",
+    mostSpentItems,
+    560,
+    listY,
+    440,
+    240,
+    (item) => `${formatMoney(item.totalSpent || 0)} • ${(item.purchases || 0).toLocaleString()}×`
+  );
+  const listY2 = listY + 270;
+  drawList(
+    "💎 Most Expensive Items",
+    topExpensive,
+    80,
+    listY2,
+    440,
+    240,
+    (item) => `Avg ${formatMoney(item.avgPrice || 0)} • ${(item.purchases || 0).toLocaleString()}×`
+  );
+  drawList(
+    "📈 Biggest Price Increases",
+    priceIncreaseItems,
+    560,
+    listY2,
+    440,
+    240,
+    (item) => `${formatMoney(item.min)} → ${formatMoney(item.max)}`
+  );
+
+  // dynamic height trim and redraw once we know bottom
+  const bottomContent = listY2 + 240 + 100;
+  const finalHeight = Math.max(minHeight, Math.ceil(bottomContent));
+  if (finalHeight !== canvas.height) {
+    canvas.height = finalHeight;
+    drawBackground(finalHeight);
+    drawHeader();
+    // re-draw cards
+    cx = 80;
+    cy = cardBaseY;
+    drawCard("💰 Total Spent", formatMoney(totalSpent), "Net of returns", cx, cy, "#22d3ee");
+    cx += cardW + gap;
+    drawCard("🛒 Total Trips", totalTrips.toLocaleString(), "All channels", cx, cy, "#a855f7");
+    cx += cardW + gap;
+    drawCard("📊 Avg per Trip", formatMoney(avgPerTrip), null, cx, cy, "#f97316");
+
+    cx = 80;
+    cy += cardH + gap;
+    drawCard("⛽ Total Gas Trips", (gasStats.totalTrips || 0).toLocaleString(), null, cx, cy, "#22c55e");
+    cx += cardW + gap;
+    drawCard("🛢️ Total Gallons", formatGallons(gasStats.totalGallons || 0), null, cx, cy, "#22c55e");
+    cx += cardW + gap;
+    drawCard("🍗 Rotisserie", `${(summary.rotisserieCount || 0).toLocaleString()}×`, formatMoney(summary.rotisserieSpent || 0), cx, cy, "#d6a66a");
+
+    cx = 80;
+    cy += cardH + gap;
+    drawCard("📍 Top Warehouse", topWarehouse ? `${truncateName(topWarehouse[0], 24)} • ${topWarehouse[1]}×` : "—", null, cx, cy, "#c084fc");
+    cx += cardW + gap;
+    drawCard("🧾 Biggest Trip", biggestTrip.total ? `${formatMoney(biggestTrip.total)} • ${truncateName(biggestTrip.label, 22)}` : "No trips", null, cx, cy, "#fbbf24");
+    cx += cardW + gap;
+    drawCard("📅 Biggest Month", biggestMonth ? `${biggestMonth.label} • ${formatMoney(biggestMonth.total)}` : "No data", null, cx, cy, "#38bdf8");
+
+    const listYv = cy + cardH + 60;
+    drawList(
+      "🛍️ Top 3 Purchased Items",
+      topPurchased,
+      80,
+      listYv,
+      440,
+      240,
+      (item) => `${(item.purchases || 0).toLocaleString()}× • ${formatMoney((item.totalSpent || 0) / Math.max(item.purchases || 1, 1))} avg`
+    );
+    drawList(
+      "💰 Most Total Spent Items",
+      mostSpentItems,
+      560,
+      listYv,
+      440,
+      240,
+      (item) => `${formatMoney(item.totalSpent || 0)} • ${(item.purchases || 0).toLocaleString()}×`
+    );
+    const listYv2 = listYv + 270;
+    drawList(
+      "💎 Most Expensive Items",
+      topExpensive,
+      80,
+      listYv2,
+      440,
+      240,
+      (item) => `Avg ${formatMoney(item.avgPrice || 0)} • ${(item.purchases || 0).toLocaleString()}×`
+    );
+    drawList(
+      "📈 Biggest Price Increases",
+      priceIncreaseItems,
+      560,
+      listYv2,
+      440,
+      240,
+      (item) => `${formatMoney(item.min)} → ${formatMoney(item.max)}`
+    );
+  }
+
+  // Watermark
+  ctx.fillStyle = "rgba(255,255,255,0.6)";
+  ctx.font = "16px 'Segoe UI', sans-serif";
+  const watermark = "Generated by Costco Damages";
+  const wmWidth = ctx.measureText(watermark).width;
+  ctx.fillText(watermark, width - wmWidth - 40, canvas.height - 40);
+
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const link = document.createElement("a");
+    link.download = "costco-damages-summary.png";
+    link.href = URL.createObjectURL(blob);
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(link.href);
+      document.body.removeChild(link);
+    }, 0);
+  });
 }
 
 function formatNumber(value) {
