@@ -17,8 +17,6 @@ const monthFormatter = new Intl.DateTimeFormat("en-US", {
 const statusEl = document.getElementById("status");
 const EXTENSION_STORAGE_KEY = "costcoReceiptsData";
 const hasChrome = typeof chrome !== "undefined";
-let storedReceipts = [];
-let storedOnlineOrders = [];
 const presetSelect = document.getElementById("datePreset");
 const customStartInput = document.getElementById("customStart");
 const customEndInput = document.getElementById("customEnd");
@@ -43,10 +41,6 @@ const chartTooltip = document.getElementById("chartTooltip");
 const ROTISSERIE_LABEL = "🍗";
 const ROTISSERIE_TOOLTIP = "Rotisserie Chicken";
 const ROTISSERIE_CARD_CLASS = "rotisserie-card";
-let activeTab = "all";
-let latestSummaryPayload = null;
-let storedOnlineOrderDetails = {};
-let storedWarehouseDetails = {};
 const chartState = {
   canvas: chartCanvas,
   ctx: chartCanvas ? chartCanvas.getContext("2d") : null,
@@ -61,6 +55,15 @@ const chartState = {
     online: "onlineSpent",
     gas: "gasSpent"
   }
+};
+
+const appState = {
+  activeTab: "all",
+  receipts: [],
+  onlineOrders: [],
+  warehouseDetails: {},
+  onlineOrderDetails: {},
+  latestSummary: null
 };
 
 const filterState = {
@@ -105,8 +108,8 @@ if (monthSelect) {
 
 if (downloadJsonBtn) {
   downloadJsonBtn.addEventListener("click", () => {
-    const filteredReceipts = filterReceipts(storedReceipts);
-    const filteredOnline = filterOnlineOrders(storedOnlineOrders);
+    const filteredReceipts = filterReceipts(appState.receipts);
+    const filteredOnline = filterOnlineOrders(appState.onlineOrders);
     const blob = new Blob(
       [JSON.stringify({ receipts: filteredReceipts, onlineOrders: filteredOnline }, null, 2)],
       {
@@ -154,23 +157,23 @@ tabButtons.forEach((button) => {
     tabContents.forEach((content) => {
       content.classList.toggle("active", content.id === targetId);
     });
-    activeTab = tabModeMap[targetId] || "all";
-    if (latestSummaryPayload) {
+    appState.activeTab = tabModeMap[targetId] || "all";
+    if (appState.latestSummary) {
       renderSummary(
-        latestSummaryPayload.summary,
-        latestSummaryPayload.onlineData,
-        latestSummaryPayload.gasStats,
-        latestSummaryPayload.warehouseVisits
+        appState.latestSummary.summary,
+        appState.latestSummary.onlineData,
+        appState.latestSummary.gasStats,
+        appState.latestSummary.warehouseVisits
       );
       renderTopItemSections(
-        latestSummaryPayload.itemStats,
-        latestSummaryPayload.onlineData,
-        latestSummaryPayload.onlineOrders || []
+        appState.latestSummary.itemStats,
+        appState.latestSummary.onlineData,
+        appState.latestSummary.onlineOrders || []
       );
       renderAllVisits(
-        latestSummaryPayload.warehouseVisits,
-        latestSummaryPayload.onlineData.rows,
-        latestSummaryPayload.gasStats.trips
+        appState.latestSummary.warehouseVisits,
+        appState.latestSummary.onlineData.rows,
+        appState.latestSummary.gasStats.trips
       );
     }
     updateChartControls();
@@ -498,27 +501,27 @@ function filterOnlineOrders(orders) {
 }
 
 function applyFilterAndRender() {
-  const filteredReceipts = filterReceipts(storedReceipts);
-  const filteredOnlineOrders = filterOnlineOrders(storedOnlineOrders);
+  const filteredReceipts = filterReceipts(appState.receipts);
+  const filteredOnlineOrders = filterOnlineOrders(appState.onlineOrders);
   handleData(filteredReceipts, filteredOnlineOrders);
 }
 
 function setData(newReceipts, newWarehouseDetails, newOnlineOrders, newOnlineOrderDetails) {
-  storedReceipts = Array.isArray(newReceipts) ? newReceipts : [];
-  storedWarehouseDetails =
+  appState.receipts = Array.isArray(newReceipts) ? newReceipts : [];
+  appState.warehouseDetails =
     newWarehouseDetails && typeof newWarehouseDetails === "object"
       ? newWarehouseDetails
       : {};
-  storedOnlineOrders = Array.isArray(newOnlineOrders) ? newOnlineOrders : [];
-  storedOnlineOrderDetails =
+  appState.onlineOrders = Array.isArray(newOnlineOrders) ? newOnlineOrders : [];
+  appState.onlineOrderDetails =
     newOnlineOrderDetails && typeof newOnlineOrderDetails === "object"
       ? newOnlineOrderDetails
       : {};
-  const bounds = getCombinedBounds(storedReceipts, storedOnlineOrders);
+  const bounds = getCombinedBounds(appState.receipts, appState.onlineOrders);
   filterState.customStart = bounds.start ? formatInputDate(bounds.start) : null;
   filterState.customEnd = bounds.end ? formatInputDate(bounds.end) : null;
   updateCustomDateInputs(bounds);
-  populateMonthOptions(storedReceipts, storedOnlineOrders);
+  populateMonthOptions(appState.receipts, appState.onlineOrders);
   applyFilterAndRender();
 }
 
@@ -537,12 +540,12 @@ function handleData(receipts, onlineOrders) {
   setMetricsChartData(monthlyData);
 
   renderSummary(summary, onlineData, gasStats, warehouseVisits);
-  if (latestSummaryPayload) {
-    latestSummaryPayload.itemStats = itemStats;
-    latestSummaryPayload.onlineOrders = onlineOrders;
-    latestSummaryPayload.monthlyData = monthlyData;
+  if (appState.latestSummary) {
+    appState.latestSummary.itemStats = itemStats;
+    appState.latestSummary.onlineOrders = onlineOrders;
+    appState.latestSummary.monthlyData = monthlyData;
   } else {
-    latestSummaryPayload = {
+    appState.latestSummary = {
       summary,
       onlineData,
       gasStats,
@@ -885,13 +888,14 @@ function processOnlineOrders(orders) {
 }
 
 function renderSummary(summary, onlineData, gasStats, warehouseVisits) {
-  latestSummaryPayload = {
+  appState.latestSummary = {
     summary,
     onlineData,
     gasStats,
     warehouseVisits,
-    itemStats: latestSummaryPayload?.itemStats,
-    onlineOrders: latestSummaryPayload?.onlineOrders
+    itemStats: appState.latestSummary?.itemStats,
+    onlineOrders: appState.latestSummary?.onlineOrders,
+    monthlyData: appState.latestSummary?.monthlyData
   };
   const summaryGrid = document.getElementById("summaryGrid");
   const topLocationsEl = document.getElementById("globalTopLocations");
@@ -907,7 +911,7 @@ function renderSummary(summary, onlineData, gasStats, warehouseVisits) {
   const gasLocationMap = gasStats?.locationCounts || new Map();
 
   const { cards, locations, coverage } = buildSummaryCards(
-    activeTab,
+    appState.activeTab,
     summary,
     onlineData,
     gasStats,
@@ -940,7 +944,7 @@ function renderSummary(summary, onlineData, gasStats, warehouseVisits) {
     summaryGrid.appendChild(card);
   });
 
-  renderTopLocationsPills(locations, activeTab === "online");
+  renderTopLocationsPills(locations, appState.activeTab === "online");
   if (coverageEl) {
     coverageEl.textContent = coverage || "";
   }
@@ -1756,7 +1760,7 @@ function setMetricsChartData(data) {
 
 function updateChartControls() {
   if (!chartState.canvas || !chartState.ctx || !chartState.controls) return;
-  const options = CHART_METRICS[activeTab] || [];
+  const options = CHART_METRICS[appState.activeTab] || [];
   if (!chartState.data || !options.length) {
     if (chartState.controls) {
       chartState.controls.innerHTML = "";
@@ -1779,12 +1783,12 @@ function updateChartControls() {
     } else {
       btn.title = option.label;
     }
-    if (chartState.currentMetric[activeTab] === option.id) {
+    if (chartState.currentMetric[appState.activeTab] === option.id) {
       btn.classList.add("active");
     }
     btn.addEventListener("click", () => {
-      if (chartState.currentMetric[activeTab] !== option.id) {
-        chartState.currentMetric[activeTab] = option.id;
+      if (chartState.currentMetric[appState.activeTab] !== option.id) {
+        chartState.currentMetric[appState.activeTab] = option.id;
         updateChartControls();
       }
     });
@@ -1793,7 +1797,7 @@ function updateChartControls() {
 
   if (chartState.subtitle) {
     chartState.subtitle.textContent =
-      CHART_SUBTITLES[activeTab] || "Metrics reflect the current filters.";
+      CHART_SUBTITLES[appState.activeTab] || "Metrics reflect the current filters.";
   }
 
   renderMetricsChart();
@@ -1803,16 +1807,16 @@ function renderMetricsChart() {
   if (!chartState.canvas || !chartState.ctx || !chartState.data) return;
   hideChartTooltip();
   chartState.hitRegions = [];
-  const options = CHART_METRICS[activeTab] || [];
+  const options = CHART_METRICS[appState.activeTab] || [];
   if (!options.length) {
     drawNoChartData("No chart data available.");
     return;
   }
-  const currentId = chartState.currentMetric[activeTab] || options[0].id;
+  const currentId = chartState.currentMetric[appState.activeTab] || options[0].id;
   let selected = options.find((opt) => opt.id === currentId);
   if (!selected) {
     selected = options[0];
-    chartState.currentMetric[activeTab] = selected.id;
+    chartState.currentMetric[appState.activeTab] = selected.id;
   }
   const dataset = selected.builder(chartState.data);
   if (!dataset || !dataset.labels || !dataset.labels.length) {
@@ -2076,7 +2080,10 @@ function drawBarChart(dataset) {
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.font = "11px 'Segoe UI', sans-serif";
-    ctx.fillText(label, x + barWidth / 2, height - padding.bottom + 6);
+    const showLabel = labels.length <= 12 || idx % 2 === 0;
+    if (showLabel) {
+      ctx.fillText(label, x + barWidth / 2, height - padding.bottom + 6);
+    }
   });
 }
 
@@ -2166,7 +2173,10 @@ function drawStackedChart(dataset) {
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.font = "11px 'Segoe UI', sans-serif";
-    ctx.fillText(label, padding.left + idx * slot + barWidth / 2, height - padding.bottom + 8);
+    const showLabel = labels.length <= 12 || idx % 2 === 0;
+    if (showLabel) {
+      ctx.fillText(label, padding.left + idx * slot + barWidth / 2, height - padding.bottom + 8);
+    }
   });
 
   drawLegend(series);
@@ -2395,13 +2405,13 @@ function truncateName(name, maxLen = 28) {
 }
 
 function downloadSummaryPng() {
-  if (!latestSummaryPayload) return;
-  const { summary, onlineData, gasStats, warehouseVisits, itemStats, onlineOrders } = latestSummaryPayload;
+  if (!appState.latestSummary) return;
+  const { summary, onlineData, gasStats, warehouseVisits, itemStats, onlineOrders } = appState.latestSummary;
   const warehouseLocations = buildLocationMapFromVisits(warehouseVisits);
   const onlineLocations = onlineData.locationCounts || new Map();
   const gasLocations = gasStats?.locationCounts || new Map();
   const coverage = buildCoverageForTab(
-    activeTab,
+    appState.activeTab,
     summary,
     onlineData,
     gasStats,
@@ -2414,22 +2424,22 @@ function downloadSummaryPng() {
   const netOnlineSpent = (onlineData.totalSpent || 0) - (onlineData.returnAmount || 0);
   let totalTrips = summary.shoppingReceipts + onlineData.totalOrders + gasStats.totalTrips;
   let totalSpent = netWarehouseSpent + netOnlineSpent + (gasStats.totalCost || 0);
-  if (activeTab === "warehouse") {
+  if (appState.activeTab === "warehouse") {
     totalTrips = summary.shoppingReceipts;
     totalSpent = netWarehouseSpent;
-  } else if (activeTab === "online") {
+  } else if (appState.activeTab === "online") {
     totalTrips = onlineData.totalOrders;
     totalSpent = netOnlineSpent;
-  } else if (activeTab === "gas") {
+  } else if (appState.activeTab === "gas") {
     totalTrips = gasStats.totalTrips;
     totalSpent = gasStats.totalCost || 0;
   }
 
   const combinedStats = buildCombinedItemStatsForTab(
-    activeTab,
+    appState.activeTab,
     itemStats,
     onlineOrders,
-    storedOnlineOrderDetails
+    appState.onlineOrderDetails
   );
   const topPurchased = getTopPurchasedItems(combinedStats, 3);
   const topExpensive = getTopExpensiveItems(combinedStats, 3);
@@ -2437,7 +2447,7 @@ function downloadSummaryPng() {
   const mostSpentItems = getTopSpentItems(combinedStats, 3);
   const topWarehouse = getTopWarehouseLocation(warehouseVisits);
   const biggestTrip = getBiggestTrip(warehouseVisits, onlineData.rows, gasStats.trips);
-  const biggestMonth = getBiggestMonth(latestSummaryPayload.monthlyData || {});
+  const biggestMonth = getBiggestMonth(appState.latestSummary.monthlyData || {});
 
   const canvas = document.createElement("canvas");
   const width = 1080;
@@ -2464,13 +2474,13 @@ function downloadSummaryPng() {
   };
 
   const drawHeader = () => {
-    const titleText = "Costco Damages Wrapped";
+    const titleText = "Costcoholic Wrapped";
     ctx.fillStyle = "#f8fafc";
     ctx.font = "52px 'Segoe UI Semibold', 'Segoe UI', sans-serif";
     ctx.fillText(titleText, 80, 120);
     ctx.font = "22px 'Segoe UI', sans-serif";
     ctx.fillStyle = "#cbd5e1";
-    const tabLabel = activeTab.charAt(0).toUpperCase() + activeTab.slice(1);
+  const tabLabel = appState.activeTab.charAt(0).toUpperCase() + appState.activeTab.slice(1);
     ctx.fillText(`Tab: ${tabLabel} • ${coverage || "Date range unavailable"}`, 80, 160);
 
     const pillText = "Spending Highlights";
@@ -2691,7 +2701,7 @@ function downloadSummaryPng() {
   // Watermark
   ctx.fillStyle = "rgba(255,255,255,0.6)";
   ctx.font = "16px 'Segoe UI', sans-serif";
-  const watermark = "Generated by Costco Damages";
+  const watermark = "Generated by Costcoholic";
   const wmWidth = ctx.measureText(watermark).width;
   ctx.fillText(watermark, width - wmWidth - 40, canvas.height - 40);
 
@@ -2752,7 +2762,7 @@ function loadReceiptsFromStorage() {
   chrome.storage.local.get(EXTENSION_STORAGE_KEY, (result) => {
     if (chrome.runtime?.lastError) {
       console.warn(
-        "Costco Damages Dashboard: could not read storage",
+        "Costcoholic Spending Dashboard: could not read storage",
         chrome.runtime.lastError
       );
       return;
@@ -2810,7 +2820,7 @@ if (hasChrome) {
 }
 function renderTopItemSections(itemStats, onlineData, filteredOnlineOrders) {
   if (!topItemsSection) return;
-  const isGasTab = activeTab === "gas";
+  const isGasTab = appState.activeTab === "gas";
   topItemsSection.style.display = isGasTab ? "none" : "grid";
   if (topItemsSecondarySection) {
     topItemsSecondarySection.style.display = isGasTab ? "none" : "grid";
@@ -2823,16 +2833,16 @@ function renderTopItemSections(itemStats, onlineData, filteredOnlineOrders) {
     return;
   }
 
-  const nameCharLimit = activeTab === "online" ? 15 : null;
+  const nameCharLimit = appState.activeTab === "online" ? 15 : null;
   let combinedStats = new Map();
-  if (activeTab === "online") {
-    combinedStats = buildOnlineItemStats(filteredOnlineOrders, storedOnlineOrderDetails);
-  } else if (activeTab === "warehouse") {
+  if (appState.activeTab === "online") {
+    combinedStats = buildOnlineItemStats(filteredOnlineOrders, appState.onlineOrderDetails);
+  } else if (appState.activeTab === "warehouse") {
     combinedStats = itemStats;
   } else {
     combinedStats = mergeItemStats(
       itemStats,
-      buildOnlineItemStats(filteredOnlineOrders, storedOnlineOrderDetails)
+      buildOnlineItemStats(filteredOnlineOrders, appState.onlineOrderDetails)
     );
   }
 
@@ -2951,8 +2961,8 @@ function closeOrderDetailsModal() {
 
 function fetchAndDisplayOrderDetails(orderNumber) {
   openOrderDetailsModal(`Loading details for order #${orderNumber}...`);
-  const detail = storedOnlineOrderDetails
-    ? storedOnlineOrderDetails[orderNumber]
+  const detail = appState.onlineOrderDetails
+    ? appState.onlineOrderDetails[orderNumber]
     : null;
   if (!detail) {
     if (orderDetailsContent) {
@@ -3015,8 +3025,8 @@ function renderOrderDetailsView(detail, fallbackOrderNumber) {
 
 function fetchAndDisplayWarehouseDetails(barcode) {
   openOrderDetailsModal(`Loading receipt ${barcode}...`);
-  const detail = storedWarehouseDetails
-    ? storedWarehouseDetails[barcode]
+  const detail = appState.warehouseDetails
+    ? appState.warehouseDetails[barcode]
     : null;
   if (!detail) {
     if (orderDetailsContent) {

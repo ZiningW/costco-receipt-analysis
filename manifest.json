@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Costco Damages",
+  "name": "Costcoholic",
   "version": "1.1.0",
-  "description": "Costco Damages downloads your receipts and shows a detailed spending dashboard.",
+  "description": "Costcoholic downloads your Costco receipts and shows a detailed spending dashboard.",
+  "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": ["https://www.costco.com/*"],
+      "matches": ["https://www.costco.com/*", "https://www.costco.ca/*"],
       "js": ["content-script.js"],
       "run_at": "document_idle"
     }
@@ -15,7 +16,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Costco Damages",
+    "default_title": "Costcoholic",
     "default_icon": {
       "16": "icon16.png",
       "48": "icon48.png",
@@ -34,6 +35,7 @@
   ],
   "host_permissions": [
     "https://www.costco.com/*",
+    "https://www.costco.ca/*",
     "https://ecom-api.costco.com/*"
   ],
   "web_accessible_resources": [

@@ -1,8 +1,8 @@
 Grateful thanks to Reddit users [ViKoToMo](https://www.reddit.com/r/Costco/comments/1p4w903/costco_damage_to_wallet_fork/?sort=new) and [ikeee](https://www.reddit.com/r/Costco/comments/1p47dzr/the_damage_costco_has_caused_my_wallet_over_3/) for the original ideas that inspired this project.
 
-# Costco Damages
+# Costcoholic
 
-Costco Damages is a Chrome extension that downloads your Costco warehouse, gas, and online purchase history and renders a dashboard with spending insights. Everything runs locally in your browser; data is stored in `chrome.storage.local` and never sent elsewhere.
+Costcoholic is a Chrome extension that downloads your Costco warehouse, gas, and online purchase history and renders a dashboard with spending insights. Everything runs locally in your browser; data is stored in `chrome.storage.local` and never sent elsewhere.
 
 ## Install (local / developer mode)
 
@@ -10,7 +10,7 @@ Costco Damages is a Chrome extension that downloads your Costco warehouse, gas, 
 2. Open `chrome://extensions` in Chrome.
 3. Enable “Developer mode” (top right).
 4. Click “Load unpacked” and select the project folder.
-5. Confirm the extension shows up as “Costco Damages”.
+5. Confirm the extension shows up as “Costcoholic”.
 
 ## Using the extension
 

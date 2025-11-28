@@ -1,16 +1,63 @@
 // content-script.js
 
-console.log("Costco Damages Extension: content script loaded on", location.href);
+console.log("Costcoholic Extension: content script loaded on", location.href);
 
 (function () {
+  // One-time region prompt if coming from US Order Status with flag
+  (function maybePromptForCanadianMembership() {
+    if (typeof chrome === "undefined" || !chrome.storage?.sync) return;
+    let parsed;
+    try {
+      parsed = new URL(window.location.href);
+    } catch (e) {
+      return;
+    }
+    if (!/OrderStatusCmd/i.test(parsed.pathname)) return;
+    if (parsed.searchParams.get("cd_region_prompt") !== "1") return;
+
+    // Clean query param for any non-redirect case
+    parsed.searchParams.delete("cd_region_prompt");
+    const cleanedUrl = parsed.toString();
+
+    chrome.storage.sync.get(
+      { regionPreference: "US", regionPromptDone: false },
+      (res) => {
+        if (res.regionPromptDone) {
+          window.history.replaceState(null, "", cleanedUrl);
+          return;
+        }
+
+        const msg =
+          "Do you have a Canadian Costco membership?\n\n" +
+          "If yes, we can redirect you to the Canadian Order Status page " +
+          "and use that as your default.";
+
+        const hasCanadian = window.confirm(msg);
+        const updates = { regionPromptDone: true };
+
+        if (hasCanadian) {
+          updates.regionPreference = "CA";
+          chrome.storage.sync.set(updates, () => {
+            window.location.href = "https://www.costco.ca/OrderStatusCmd";
+          });
+        } else {
+          updates.regionPreference = "US";
+          chrome.storage.sync.set(updates, () => {
+            window.history.replaceState(null, "", cleanedUrl);
+          });
+        }
+      }
+    );
+  })();
+
   // Avoid duplicates if something causes the script to run multiple times
   let existing = document.getElementById("costco-receipts-download-btn");
   if (existing) {
-    console.log("Costco Damages Extension: button already exists, not adding again");
+    console.log("Costcoholic Extension: button already exists, not adding again");
     return;
   }
 
-  console.log("Costco Damages Extension: injecting button");
+  console.log("Costcoholic Extension: injecting button");
 
   // Create a floating button
   const btn = document.createElement("button");
@@ -86,9 +133,9 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
           },
           (resp) => {
             if (chrome.runtime.lastError) {
-              console.warn("Costco Damages Extension: error sending data to background:", chrome.runtime.lastError);
+              console.warn("Costcoholic Extension: error sending data to background:", chrome.runtime.lastError);
             } else {
-              console.log("Costco Damages Extension: receipts sent to background, dashboard should open.", resp);
+              console.log("Costcoholic Extension: receipts sent to background, dashboard should open.", resp);
             }
           }
         );
@@ -103,8 +150,13 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
       btn.textContent = "View Spending Summary";
       btn.disabled = false;
     } catch (err) {
-      console.error("Costco Damages Extension: error downloading receipts", err);
-      alert("Error downloading receipts. Please try refreshing the page and make sure that you're logged in to Costco");
+      console.error("Costcoholic Extension: error downloading receipts", err);
+      alert(
+        "Error downloading receipts.\n\n" +
+        "1) Refresh this page and make sure you're logged in to your Costco account.\n" +
+        "2) If you still see errors, Costco may require that you verify your membership.\n" +
+        "   Go to the Costco Order Status page, click the \"Warehouse\" tab, and follow any verification instructions there.\n"
+      );
       btn.textContent = "View Spending Summary";
       btn.disabled = false;
     }
@@ -115,7 +167,7 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
   // -------- API logic ----------
 
   async function listReceipts(startDate, endDate) {
-    console.log("Costco Damages Extension: listReceipts", { startDate, endDate });
+    console.log("Costcoholic Extension: listReceipts", { startDate, endDate });
 
     return await new Promise(function (resolve, reject) {
       const xhr = new XMLHttpRequest();
@@ -197,7 +249,7 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
           const result = xhr.response.data.receiptsWithCounts;
           resolve((result && result.receipts) || []);
         } else {
-          console.error("Costco Damages Extension: bad status", xhr.status, xhr.response);
+          console.error("Costcoholic Extension: bad status", xhr.status, xhr.response);
           reject(
             new Error(
               "Request failed with status " +
@@ -210,7 +262,7 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
       };
 
       xhr.onerror = function () {
-        console.error("Costco Damages Extension: network error");
+        console.error("Costcoholic Extension: network error");
         reject(new Error("Network error"));
       };
 
@@ -219,7 +271,7 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
   }
 
   async function listOnlineOrders(startDate, endDate) {
-    console.log("Costco Damages Extension: listOnlineOrders start", { startDate, endDate });
+    console.log("Costcoholic Extension: listOnlineOrders start", { startDate, endDate });
     const dedup = new Map();
     const numbers = ["847"];
     for (const warehouseNumber of numbers) {
@@ -308,7 +360,7 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
           };
           xhr.send(JSON.stringify({ query, variables }));
         }).catch((err) => {
-          console.warn("Costco Damages Extension: online orders error", err);
+          console.warn("Costcoholic Extension: online orders error", err);
           return null;
         });
 
@@ -390,7 +442,7 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
       }
       return {};
     }
-    console.log("Costco Damages Extension: fetching order details", {
+    console.log("Costcoholic Extension: fetching order details", {
       totalOrders: orderNumbers.length
     });
     const details = {};
@@ -412,14 +464,14 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
         }
       } catch (err) {
         console.warn(
-          "Costco Damages Extension: order detail fetch failed",
+          "Costcoholic Extension: order detail fetch failed",
           { orderNumber: number },
           err
         );
       }
       /* eslint-enable no-await-in-loop */
     }
-    console.log("Costco Damages Extension: order detail fetch complete", {
+    console.log("Costcoholic Extension: order detail fetch complete", {
       requested: orderNumbers.length,
       fetched: Object.keys(details).length
     });
@@ -512,7 +564,7 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
     const onlineOrders = await listOnlineOrders(startDateStr, endDateStr);
     const orderDetails = await fetchOnlineOrderDetails(onlineOrders, reportProgress);
     console.log({
-      message: "Costco Damages Extension: fetch complete",
+      message: "Costcoholic Extension: fetch complete",
       receiptCount: receipts.length,
       onlineOrderCount: onlineOrders.length,
       warehouseDetailCount: Object.keys(warehouseDetails).length,

@@ -1,7 +1,8 @@
 // background.js (MV3)
 
 const RECEIPT_STORAGE_KEY = "costcoReceiptsData";
-const ORDER_STATUS_URL = "https://www.costco.com/OrderStatusCmd";
+const ORDER_STATUS_US_URL = "https://www.costco.com/OrderStatusCmd";
+const ORDER_STATUS_CA_URL = "https://www.costco.ca/OrderStatusCmd";
 let lastReceipts = [];
 let lastWarehouseDetails = {};
 let lastOnlineOrders = [];
@@ -21,7 +22,7 @@ function persistReceipts(receipts, warehouseDetails, onlineOrders, orderDetails)
     chrome.storage.local.set({ [RECEIPT_STORAGE_KEY]: payload }, () => {
       if (chrome.runtime.lastError) {
         console.warn(
-          "Costco Damages Extension: failed to store receipts",
+          "Costcoholic Extension: failed to store receipts",
           chrome.runtime.lastError
         );
         resolve(false);
@@ -74,7 +75,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.local.get(RECEIPT_STORAGE_KEY, (result) => {
       if (chrome.runtime.lastError) {
         console.warn(
-          "Costco Damages Extension: failed loading receipts from storage",
+          "Costcoholic Extension: failed loading receipts from storage",
           chrome.runtime.lastError
         );
       }
@@ -118,24 +119,47 @@ if (chrome.contextMenus) {
           contexts: ["action"]
         });
       } catch (err) {
-        console.warn("Costco Damages Extension: could not create context menu", err);
+        console.warn("Costcoholic Extension: could not create context menu", err);
       }
     });
   });
 
-  chrome.contextMenus.onClicked.addListener((info) => {
+  chrome.contextMenus.onClicked.addListener((info, tab) => {
     if (info.menuItemId === "open-costco-order-status") {
-      openOrderStatusTab();
+      openOrderStatusTab(tab || null);
     }
   });
 }
 
 if (chrome.action?.onClicked) {
-  chrome.action.onClicked.addListener(() => {
-    openOrderStatusTab();
+  chrome.action.onClicked.addListener((tab) => {
+    openOrderStatusTab(tab || null);
   });
 }
 
-function openOrderStatusTab() {
-  chrome.tabs.create({ url: ORDER_STATUS_URL });
+function openOrderStatusTab(sourceTab) {
+  if (!chrome?.storage?.sync) {
+    chrome.tabs.create({ url: ORDER_STATUS_US_URL });
+    return;
+  }
+
+  chrome.storage.sync.get(
+    { regionPreference: "US", regionPromptDone: false },
+    (res) => {
+      const pref = res.regionPreference === "CA" ? "CA" : "US";
+      let targetUrl = pref === "CA" ? ORDER_STATUS_CA_URL : ORDER_STATUS_US_URL;
+
+      if (pref === "US" && !res.regionPromptDone) {
+        try {
+          const url = new URL(targetUrl);
+          url.searchParams.set("cd_region_prompt", "1");
+          targetUrl = url.toString();
+        } catch (e) {
+          // fall back to raw URL on parse errors
+        }
+      }
+
+      chrome.tabs.create({ url: targetUrl });
+    }
+  );
 }
