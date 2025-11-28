@@ -104,7 +104,7 @@ console.log("Costco Damages Extension: content script loaded on", location.href)
       btn.disabled = false;
     } catch (err) {
       console.error("Costco Damages Extension: error downloading receipts", err);
-      alert("Error downloading receipts. Check the console for details.");
+      alert("Error downloading receipts. Please try refreshing the page and make sure that you're logged in to Costco");
       btn.textContent = "View Spending Summary";
       btn.disabled = false;
     }
