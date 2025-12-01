@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Costcoholic Spending Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div>
+        <h1><span class="icon">🧾</span>Costcoholic Spending Dashboard</h1>
+        <p id="status" class="status">No receipts loaded yet.</p>
+        <div class="controls">
+          <label for="datePreset">Range:</label>
+          <select id="datePreset">
+            <option value="all">All Time</option>
+            <option value="ytd">Year to Date</option>
+            <option value="last12">Last 12 Months</option>
+            <option value="custom">Custom Range</option>
+          </select>
+          <label for="customStart">Start:</label>
+          <input type="date" id="customStart" />
+          <label for="customEnd">End:</label>
+          <input type="date" id="customEnd" />
+          <label for="monthSelect">Month:</label>
+          <select id="monthSelect">
+            <option value="all">All Months</option>
+          </select>
+          <button id="downloadJsonBtn" type="button">Download JSON</button>
+          <button id="downloadPngBtn" type="button">Download Wrapped PNG</button>
+        </div>
+        <p id="dataCoverage" class="status">No data yet.</p>
+      </div>
+    </header>
+
+    <div class="tabs">
+      <button class="tab-button active" data-tab="allTab">All</button>
+      <button class="tab-button" data-tab="warehouseTab">Warehouse</button>
+      <button class="tab-button" data-tab="onlineTab">Online</button>
+      <button class="tab-button" data-tab="gasTab">Gas</button>
+    </div>
+
+    <section class="summary-grid" id="summaryGrid"></section>
+    <div class="top-locations-card">
+      <h3>Top Locations</h3>
+      <ul id="globalTopLocations" class="top-gas-locations"></ul>
+    </div>
+
+    <section class="card chart-card" id="metricsChartSection">
+      <div class="chart-header">
+        <div>
+          <h2><span class="icon">📊</span>Activity Overview</h2>
+          <p class="subtitle" id="chartSubtitle">Trends update with your filters.</p>
+        </div>
+        <div class="chart-controls" id="chartControls"></div>
+      </div>
+      <div class="chart-canvas-wrapper">
+        <canvas id="metricsChart"></canvas>
+        <div id="chartTooltip" class="chart-tooltip"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2><span class="icon">📋</span>Shopping Trips</h2>
+      <div class="tab-content active" id="allTab">
+        <div class="table-scroll">
+          <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Channel</th>
+              <th>Location</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="allVisitsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="tab-content" id="warehouseTab">
+        <div class="table-scroll">
+          <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Warehouse</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="warehouseVisitsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="tab-content" id="onlineTab">
+        <div class="table-scroll">
+          <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Order #</th>
+              <th>Status</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="onlineOrdersBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="tab-content" id="gasTab">
+        <div class="table-scroll">
+          <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Date</th>
+              <th>Location</th>
+              <th>Gallons</th>
+              <th>Price / Gal</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="gasTripsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Top tables -->
+    <section class="grid-2" id="topItemsSection">
+      <div class="card">
+        <h2><span class="icon">💰</span>Most Total Spent Items</h2>
+        <p class="subtitle">Items you've spent the most money on overall.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Total Spent</th>
+              <th>Times Bought</th>
+              <th>Avg Price</th>
+            </tr>
+          </thead>
+          <tbody id="mostTotalSpentBody">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2><span class="icon">📈</span>Biggest Price Increases</h2>
+        <p class="subtitle">Items that increased in price the most over time.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Min → Max</th>
+              <th>Increase</th>
+              <th>Period</th>
+              <th>Rate / Month</th>
+            </tr>
+          </thead>
+          <tbody id="priceIncreaseBody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid-2" id="topItemsSecondarySection">
+      <div class="card">
+        <h2><span class="icon">💎</span>Most Expensive Items</h2>
+        <p class="subtitle">By average price (min 3 purchases).</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Avg Price</th>
+              <th>Max Price</th>
+              <th>Purchases</th>
+            </tr>
+          </thead>
+          <tbody id="mostExpensiveBody">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2><span class="icon">🔥</span>Most Purchased Items</h2>
+        <p class="subtitle">By number of units purchased.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>Times Bought</th>
+              <th>Avg Price</th>
+              <th>Min → Max</th>
+              <th>Increase %</th>
+            </tr>
+          </thead>
+          <tbody id="mostPurchasedBody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+  <div id="orderDetailsModal" class="order-modal" aria-hidden="true">
+    <div class="order-modal__backdrop"></div>
+    <div class="order-modal__dialog" role="dialog" aria-modal="true" aria-label="Order details">
+      <button id="orderDetailsClose" class="order-modal__close" aria-label="Close order details">&times;</button>
+      <div id="orderDetailsContent" class="order-modal__content">
+        <p class="status">Select an online order to view its details.</p>
+      </div>
+    </div>
+  </div>
+  <script src="dashboard.js" defer></script>
+</body>
+</html>
