@@ -775,15 +775,18 @@ function processReceipts(receipts) {
         receipt.warehouseCity ||
         `Warehouse #${receipt.warehouseNumber || "–"}`;
       const isReturn = total < 0;
+      const receiptTax = Number(receipt.taxes) || 0;
+
       warehouseVisits.push({
         date: parsedDate,
         location,
         total,
         barcode: receipt.transactionBarcode || receipt.transactionNumber || "",
-        isReturn
+        isReturn,
+        items: receiptUnits,
+        tax: receiptTax
       });
 
-      const receiptTax = Number(receipt.taxes) || 0;
       if (isReturn) {
         returnCount += 1;
         returnAmount += Math.abs(total);
@@ -915,7 +918,9 @@ function processOnlineOrders(orders) {
         status: order.status || "",
         total,
         location,
-        isReturn
+        isReturn,
+        items: itemList.length,
+        tax: orderTax
       });
     });
   }
@@ -1505,7 +1510,7 @@ function renderWarehouseVisits(rows) {
   if (!rows || !rows.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 3;
+    td.colSpan = 5;
     td.className = "status";
     td.textContent = "No warehouse trips in this range.";
     tr.appendChild(td);
@@ -1536,6 +1541,19 @@ function renderWarehouseVisits(rows) {
       locationTd.textContent = visit.location || "—";
       tr.appendChild(locationTd);
 
+      const itemsTd = document.createElement("td");
+      itemsTd.textContent =
+        typeof visit.items === "number"
+          ? visit.items.toLocaleString()
+          : "—";
+      tr.appendChild(itemsTd);
+
+      const taxTd = document.createElement("td");
+      taxTd.className = "money";
+      taxTd.textContent =
+        typeof visit.tax === "number" ? formatMoney(visit.tax) : formatMoney(0);
+      tr.appendChild(taxTd);
+
       const totalTd = document.createElement("td");
       totalTd.className = "money";
       totalTd.textContent = formatMoney(visit.total);
@@ -1552,7 +1570,7 @@ function renderOnlineOrders(rows) {
   if (!rows || !rows.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 4;
+    td.colSpan = 6;
     td.className = "status";
     td.textContent = "No online orders in this range.";
     tr.appendChild(td);
@@ -1586,6 +1604,19 @@ function renderOnlineOrders(rows) {
       const statusTd = document.createElement("td");
       statusTd.textContent = order.status || "—";
       tr.appendChild(statusTd);
+
+      const itemsTd = document.createElement("td");
+      itemsTd.textContent =
+        typeof order.items === "number"
+          ? order.items.toLocaleString()
+          : "—";
+      tr.appendChild(itemsTd);
+
+      const taxTd = document.createElement("td");
+      taxTd.className = "money";
+      taxTd.textContent =
+        typeof order.tax === "number" ? formatMoney(order.tax) : formatMoney(0);
+      tr.appendChild(taxTd);
 
       const totalTd = document.createElement("td");
       totalTd.className = "money";
