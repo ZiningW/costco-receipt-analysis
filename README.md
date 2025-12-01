@@ -1,8 +1,8 @@
-Grateful thanks to Reddit users [ViKoToMo](https://www.reddit.com/r/Costco/comments/1p4w903/costco_damage_to_wallet_fork/?sort=new) and [ikeee](https://www.reddit.com/r/Costco/comments/1p47dzr/the_damage_costco_has_caused_my_wallet_over_3/) for the original ideas that inspired this project.
+Thanks to Reddit users [ViKoToMo](https://www.reddit.com/r/Costco/comments/1p4w903/costco_damage_to_wallet_fork/?sort=new) and [ikeee](https://www.reddit.com/r/Costco/comments/1p47dzr/the_damage_costco_has_caused_my_wallet_over_3/) for the original ideas that inspired this project.
 
 # Costcoholic
-
 Costcoholic is a Chrome extension that downloads your Costco warehouse, gas, and online purchase history and renders a dashboard with spending insights. Everything runs locally in your browser; data is stored in `chrome.storage.local` and never sent elsewhere.
+![Screenshot 2025-11-28 at 10 22 30 AM](https://github.com/user-attachments/assets/9da5f5ff-1d89-4eb1-8bce-3a3e096f73a1)
 
 ## Install (local / developer mode)
 
