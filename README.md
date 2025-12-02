@@ -18,8 +18,11 @@ Costcoholic is a Chrome extension that downloads your Costco warehouse, gas, and
 2. Click the floating “View Spending Summary” button the extension injects.
 3. The extension fetches warehouse/gas receipts (2-year window) and online orders, then opens the dashboard.
 4. Use the dashboard filters (All/YTD/Last 12 months/Custom/Month) and tabs (All, Warehouse, Online, Gas) to explore.
-5. Click “Download JSON” to export the currently filtered data.
-6. Click a warehouse visit or online order row to open the detail modal.
+5. Click “Download JSON” to export the currently filtered data as structured JSON.
+6. Click “Download CSV” to export a row-per-item CSV (warehouse, gas, and online) for the currently filtered range.
+7. Use “Download Trips CSV” to export a trip-level CSV for the Shopping Trips table and “Download Chart CSV” for the currently selected Activity Overview metric.
+8. Optionally click “Download Wrapped PNG” to generate a shareable “wrapped” summary image.
+9. Click a warehouse visit or online order row to open the detail modal.
 
 ## Key functionality
 
@@ -31,7 +34,12 @@ Costcoholic is a Chrome extension that downloads your Costco warehouse, gas, and
 - Item insights (most spent, price increases, most expensive, most purchased) on non-gas tabs.
 - Gas tracking: trips, gallons, price/gal, locations.
 - Online order details modal with items and charge breakdown; warehouse receipt modal with line items and tenders.
-- JSON export of the filtered dataset.
+- Export options:
+  - JSON export of the filtered dataset (warehouse, gas, online orders).
+  - Top-level CSV export with one row per item (warehouse, gas, online), including channel, warehouse name, quantities, unit prices, totals, and (when available) detailed online line items.
+  - Shopping Trips CSV export with per-trip stats (date, channel, location, tax, totals).
+  - Chart CSV export for the currently selected Activity Overview metric.
+  - “Wrapped” PNG export summarizing your spending highlights.
 
 ## Data flow and storage
 
