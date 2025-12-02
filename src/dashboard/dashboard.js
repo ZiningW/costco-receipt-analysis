@@ -1894,6 +1894,10 @@ function renderAllVisits(warehouseVisits, onlineOrders, gasTrips) {
       date: visit.date,
       channel: "Warehouse",
       location: visit.location || "—",
+      items: typeof visit.items === "number" ? visit.items : null,
+      gallons: null,
+      tax: typeof visit.tax === "number" ? visit.tax : null,
+      pricePerGal: null,
       total: visit.total,
       receiptBarcode: visit.barcode
     });
@@ -1904,6 +1908,10 @@ function renderAllVisits(warehouseVisits, onlineOrders, gasTrips) {
       date: order.date,
       channel: "Online",
       location: order.location || `Order #${order.orderNumber}`,
+      items: typeof order.items === "number" ? order.items : null,
+      gallons: null,
+      tax: typeof order.tax === "number" ? order.tax : null,
+      pricePerGal: null,
       total: order.total,
       orderNumber: order.orderNumber
     });
@@ -1914,6 +1922,11 @@ function renderAllVisits(warehouseVisits, onlineOrders, gasTrips) {
       date: trip.date,
       channel: "Gas",
       location: trip.location || "Gas Station",
+      items: null,
+      gallons: typeof trip.gallons === "number" ? trip.gallons : null,
+      tax: null,
+      pricePerGal:
+        typeof trip.pricePerGallon === "number" ? trip.pricePerGallon : null,
       total: trip.totalPrice
     });
   });
@@ -1921,7 +1934,7 @@ function renderAllVisits(warehouseVisits, onlineOrders, gasTrips) {
   if (!entries.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 4;
+    td.colSpan = 8;
     td.className = "status";
     td.textContent = "No trips found in this range.";
     tr.appendChild(td);
@@ -1959,6 +1972,36 @@ function renderAllVisits(warehouseVisits, onlineOrders, gasTrips) {
       locationTd.textContent = entry.location || "—";
       tr.appendChild(locationTd);
 
+      const itemsTd = document.createElement("td");
+      itemsTd.textContent =
+        typeof entry.items === "number"
+          ? entry.items.toLocaleString()
+          : "—";
+      tr.appendChild(itemsTd);
+
+      const gallonsTd = document.createElement("td");
+      gallonsTd.textContent =
+        typeof entry.gallons === "number"
+          ? formatGallons(entry.gallons)
+          : "—";
+      tr.appendChild(gallonsTd);
+
+      const taxTd = document.createElement("td");
+      taxTd.className = "money";
+      taxTd.textContent =
+        typeof entry.tax === "number"
+          ? formatMoney(entry.tax)
+          : formatMoney(0);
+      tr.appendChild(taxTd);
+
+      const priceGalTd = document.createElement("td");
+      priceGalTd.className = "money";
+      priceGalTd.textContent =
+        typeof entry.pricePerGal === "number"
+          ? formatMoney(entry.pricePerGal)
+          : "—";
+      tr.appendChild(priceGalTd);
+
       const totalTd = document.createElement("td");
       totalTd.className = "money";
       totalTd.textContent = formatMoney(entry.total);
@@ -1977,6 +2020,7 @@ function buildTripsCsvRows() {
       "Number",
       "Items/Gallons",
       "Tax",
+      "Price / Gal",
       "Total"
     ]
   ];
@@ -1995,6 +2039,7 @@ function buildTripsCsvRows() {
         visit.barcode || "",
         visit.items != null ? visit.items : "",
         visit.tax != null ? visit.tax : "",
+        "",
         visit.total != null ? visit.total : ""
       ]);
     });
@@ -2009,6 +2054,7 @@ function buildTripsCsvRows() {
         order.orderNumber || "",
         order.items != null ? order.items : "",
         order.tax != null ? order.tax : "",
+        "",
         order.total != null ? order.total : ""
       ]);
     });
@@ -2016,14 +2062,25 @@ function buildTripsCsvRows() {
 
   if (appState.activeTab === "gas" || appState.activeTab === "all") {
     (gasStats?.trips || []).forEach((trip) => {
+      const gallons =
+        typeof trip.gallons === "number" ? trip.gallons : null;
+      const total =
+        typeof trip.totalPrice === "number" ? trip.totalPrice : null;
+      const pricePerGal =
+        typeof trip.pricePerGallon === "number"
+          ? trip.pricePerGallon
+          : gallons && total
+          ? total / gallons
+          : null;
       rows.push([
         trip.date ? formatInputDate(trip.date) : "",
         "Gas",
         trip.location || "",
         trip.transactionNumber || "",
-        trip.gallons != null ? trip.gallons : "",
+        gallons != null ? gallons : "",
         "",
-        trip.totalPrice != null ? trip.totalPrice : ""
+        pricePerGal != null ? pricePerGal : "",
+        total != null ? total : ""
       ]);
     });
   }

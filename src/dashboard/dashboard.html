@@ -56,7 +56,15 @@
           <p class="subtitle" id="chartSubtitle">Trends update with your filters.</p>
         </div>
         <div class="chart-controls" id="chartControls"></div>
-        <button id="downloadChartCsvBtn" type="button">Download Chart CSV</button>
+        <button
+          id="downloadChartCsvBtn"
+          type="button"
+          class="icon-button"
+          aria-label="Download chart CSV"
+          title="Download chart CSV"
+        >
+          ⬇
+        </button>
       </div>
       <div class="chart-canvas-wrapper">
         <canvas id="metricsChart"></canvas>
@@ -67,7 +75,15 @@
     <section class="card">
       <h2>
         <span class="icon">📋</span>Shopping Trips
-        <button id="downloadTripsCsvBtn" type="button">Download Trips CSV</button>
+        <button
+          id="downloadTripsCsvBtn"
+          type="button"
+          class="icon-button"
+          aria-label="Download trips CSV"
+          title="Download trips CSV"
+        >
+          ⬇
+        </button>
       </h2>
       <div class="tab-content active" id="allTab">
         <div class="table-scroll">
@@ -77,6 +93,10 @@
               <th>Date</th>
               <th>Channel</th>
               <th>Location</th>
+              <th>Items</th>
+              <th>Gallons</th>
+              <th>Tax</th>
+              <th>Price / Gal</th>
               <th>Total</th>
             </tr>
           </thead>

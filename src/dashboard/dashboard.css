@@ -149,6 +149,24 @@
       color: #452103;
     }
 
+    .icon-button {
+      border: none;
+      background: var(--card-bg);
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+    }
+
+    .icon-button:hover {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
     .chart-canvas-wrapper {
       margin-top: 12px;
       position: relative;
