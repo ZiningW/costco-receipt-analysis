@@ -29,6 +29,7 @@ const customEndInput = document.getElementById("customEnd");
 const monthSelect = document.getElementById("monthSelect");
 const downloadJsonBtn = document.getElementById("downloadJsonBtn");
 const downloadPngBtn = document.getElementById("downloadPngBtn");
+const downloadCsvBtn = document.getElementById("downloadCsvBtn");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabContents = document.querySelectorAll(".tab-content");
 const topItemsSection = document.getElementById("topItemsSection");
@@ -57,6 +58,7 @@ const chartState = {
   tooltipEl: chartTooltip,
   data: null,
   hitRegions: [],
+  lastDataset: null,
   currentMetric: {
     all: "allSpent",
     warehouse: "warehouseSpent",
@@ -180,6 +182,12 @@ if (downloadPngBtn) {
   });
 }
 
+if (downloadCsvBtn) {
+  downloadCsvBtn.addEventListener("click", () => {
+    downloadAllDataCsv();
+  });
+}
+
 const tabModeMap = {
   allTab: "all",
   warehouseTab: "warehouse",
@@ -246,6 +254,21 @@ document.addEventListener("keydown", (event) => {
     closeOrderDetailsModal();
   }
 });
+
+const downloadChartCsvBtn = document.getElementById("downloadChartCsvBtn");
+const downloadTripsCsvBtn = document.getElementById("downloadTripsCsvBtn");
+
+if (downloadChartCsvBtn) {
+  downloadChartCsvBtn.addEventListener("click", () => {
+    downloadCurrentChartCsv();
+  });
+}
+
+if (downloadTripsCsvBtn) {
+  downloadTripsCsvBtn.addEventListener("click", () => {
+    downloadTripsCsv();
+  });
+}
 
 // =============================
 // Formatting & parsing helpers
@@ -376,6 +399,34 @@ function getCombinedBounds(receipts, onlineOrders) {
     onlineOrders.forEach((order) => consider(parseOnlineOrderDate(order)));
   }
   return { start, end };
+}
+
+function csvEscape(value) {
+  if (value == null) return "";
+  const s = String(value);
+  if (/[",\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function buildCsvContent(rows) {
+  return rows.map((row) => row.map(csvEscape).join(",")).join("\n");
+}
+
+function downloadCsvFile(filename, rows) {
+  if (!rows || !rows.length) return;
+  const content = buildCsvContent(rows);
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.download = filename;
+  link.href = URL.createObjectURL(blob);
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(link.href);
+    document.body.removeChild(link);
+  }, 0);
 }
 
 // =============================
@@ -609,6 +660,194 @@ function handleData(receipts, onlineOrders) {
   renderTopItemSections(itemStats, onlineData, onlineOrders);
   renderOnlineOrders(onlineData.rows);
   renderGasTrips(gasStats);
+}
+
+function buildAllDataCsvRows() {
+  const receipts = filterReceipts(appState.receipts);
+  const onlineOrders = filterOnlineOrders(appState.onlineOrders);
+  const header = [
+    "Date",
+    "Channel",
+    "Location",
+    "Number",
+    "Item Description",
+    "Item Number",
+    "Quantity",
+    "Unit Price",
+    "Total Price",
+    "Payment Type"
+  ];
+  const rows = [header];
+
+  receipts.forEach((receipt) => {
+    const date = parseReceiptDate(receipt);
+    const dateStr = date ? formatInputDate(date) : "";
+    const receiptNumber =
+      receipt.transactionBarcode || receipt.transactionNumber || "";
+    const location =
+      receipt.warehouseName ||
+      receipt.warehouseShortName ||
+      receipt.warehouseCity ||
+      (receipt.warehouseNumber ? `Warehouse #${receipt.warehouseNumber}` : "");
+    const tenders = Array.isArray(receipt.tenderArray)
+      ? receipt.tenderArray
+      : [];
+    const paymentType =
+      tenders.length > 0
+        ? tenders[0].tenderTypeName || tenders[0].tenderDescription || ""
+        : "";
+
+    const items = Array.isArray(receipt.itemArray)
+      ? receipt.itemArray
+      : [];
+    items.forEach((item) => {
+      const isGas = isGasItem(item);
+      const channel = isGas ? "Gas" : "Warehouse";
+      const desc = `${item.itemDescription01 || ""} ${
+        item.itemDescription02 || ""
+      }`.trim();
+      const rawUnit = Number(item.unit) || 0;
+      let quantity = rawUnit;
+      if (isGas) {
+        quantity =
+          Number(
+            item.fuelUnitQuantity != null ? item.fuelUnitQuantity : rawUnit
+          ) || 0;
+      }
+      const total = Number(item.amount) || 0;
+      let unitPrice = Number(item.itemUnitPriceAmount);
+      if (!unitPrice && quantity) {
+        unitPrice = total / quantity;
+      }
+      rows.push([
+        dateStr,
+        channel,
+        location,
+        receiptNumber,
+        desc,
+        item.itemNumber || "",
+        quantity,
+        unitPrice,
+        total,
+        paymentType
+      ]);
+    });
+  });
+
+  onlineOrders.forEach((order) => {
+    const date = parseOnlineOrderDate(order);
+    const dateStr = date ? formatInputDate(date) : "";
+    const orderNumber =
+      order.orderNumber ||
+      order.sourceOrderNumber ||
+      order.orderHeaderId ||
+      "";
+    const detailKey =
+      order.orderNumber ||
+      order.sourceOrderNumber ||
+      order.orderHeaderId ||
+      orderNumber;
+    const detail =
+      detailKey && appState.onlineOrderDetails
+        ? appState.onlineOrderDetails[detailKey]
+        : null;
+
+    const shipTos = detail
+      ? Array.isArray(detail.shipToAddress)
+        ? detail.shipToAddress
+        : Array.isArray(detail.orderShipTos)
+        ? detail.orderShipTos
+        : []
+      : [];
+
+    if (shipTos.length) {
+      shipTos.forEach((shipTo) => {
+        const lineItems = Array.isArray(shipTo.orderLineItems)
+          ? shipTo.orderLineItems
+          : [];
+        lineItems.forEach((item) => {
+          const qty = Number(item.quantity) || 0;
+          const price = Number(item.price) || 0;
+          const total =
+            Number(item.merchandiseTotalAmount) || qty * price || 0;
+          const desc =
+            item.itemDescription ||
+            item.itemDescription01 ||
+            item.sourceItemDescription ||
+            "";
+          rows.push([
+            dateStr,
+            "Online",
+            "",
+            orderNumber,
+            desc,
+            item.itemNumber || item.itemId || "",
+            qty,
+            price,
+            total,
+            "" // payment type not per-line
+          ]);
+        });
+      });
+    } else {
+      const items = Array.isArray(order.orderLineItems)
+        ? order.orderLineItems
+        : [];
+      if (items.length) {
+        items.forEach((item) => {
+          const desc = item.itemDescription || "";
+          const qty = 1;
+          rows.push([
+            dateStr,
+            "Online",
+            "",
+            orderNumber,
+            desc,
+            item.itemNumber || item.itemId || "",
+            qty,
+            null,
+            null,
+            ""
+          ]);
+        });
+      } else {
+        const total = Number(order.orderTotal) || 0;
+        rows.push([
+          dateStr,
+          "Online",
+          "",
+          orderNumber,
+          "Order total",
+          "",
+          "",
+          1,
+          total,
+          total,
+          ""
+        ]);
+      }
+    }
+  });
+
+  return rows;
+}
+
+function downloadAllDataCsv() {
+  const rows = buildAllDataCsvRows();
+  if (!rows || rows.length <= 1) return;
+  const suffixParts = [filterState.preset];
+  if (filterState.preset === "custom") {
+    suffixParts.push(
+      `${filterState.customStart || "start"}-${
+        filterState.customEnd || "end"
+      }`
+    );
+  }
+  if (filterState.month && filterState.month !== "all") {
+    suffixParts.push(`month-${filterState.month}`);
+  }
+  const suffix = suffixParts.filter(Boolean).join("_") || "all";
+  downloadCsvFile(`costco-receipts-${suffix}.csv`, rows);
 }
 
 // =============================
@@ -867,7 +1106,24 @@ function processOnlineOrders(orders) {
     orders.forEach((order) => {
       const total = Number(order.orderTotal) || 0;
       const isReturn = total < 0;
-      const orderTax = Number(order.uSTaxTotal1) || 0;
+
+      const detailKey =
+        order.orderNumber ||
+        order.sourceOrderNumber ||
+        order.orderHeaderId ||
+        "";
+      const detail =
+        detailKey && appState.onlineOrderDetails
+          ? appState.onlineOrderDetails[detailKey]
+          : null;
+
+      let orderTax = 0;
+      if (detail && detail.uSTaxTotal1 != null) {
+        orderTax = Number(detail.uSTaxTotal1) || 0;
+      } else if (order.uSTaxTotal1 != null) {
+        orderTax = Number(order.uSTaxTotal1) || 0;
+      }
+
       if (isReturn) {
         returnCount += 1;
         returnAmount += Math.abs(total);
@@ -1712,6 +1968,75 @@ function renderAllVisits(warehouseVisits, onlineOrders, gasTrips) {
     });
 }
 
+function buildTripsCsvRows() {
+  const rows = [
+    [
+      "Date",
+      "Channel",
+      "Location",
+      "Number",
+      "Items/Gallons",
+      "Tax",
+      "Total"
+    ]
+  ];
+
+  const { latestSummary } = appState;
+  if (!latestSummary) return rows;
+
+  const { warehouseVisits, onlineData, gasStats } = latestSummary;
+
+  if (appState.activeTab === "warehouse" || appState.activeTab === "all") {
+    (warehouseVisits || []).forEach((visit) => {
+      rows.push([
+        visit.date ? formatInputDate(visit.date) : "",
+        "Warehouse",
+        visit.location || "",
+        visit.barcode || "",
+        visit.items != null ? visit.items : "",
+        visit.tax != null ? visit.tax : "",
+        visit.total != null ? visit.total : ""
+      ]);
+    });
+  }
+
+  if (appState.activeTab === "online" || appState.activeTab === "all") {
+    (onlineData?.rows || []).forEach((order) => {
+      rows.push([
+        order.date ? formatInputDate(order.date) : "",
+        "Online",
+        order.location || "",
+        order.orderNumber || "",
+        order.items != null ? order.items : "",
+        order.tax != null ? order.tax : "",
+        order.total != null ? order.total : ""
+      ]);
+    });
+  }
+
+  if (appState.activeTab === "gas" || appState.activeTab === "all") {
+    (gasStats?.trips || []).forEach((trip) => {
+      rows.push([
+        trip.date ? formatInputDate(trip.date) : "",
+        "Gas",
+        trip.location || "",
+        trip.transactionNumber || "",
+        trip.gallons != null ? trip.gallons : "",
+        "",
+        trip.totalPrice != null ? trip.totalPrice : ""
+      ]);
+    });
+  }
+
+  return rows;
+}
+
+function downloadTripsCsv() {
+  const rows = buildTripsCsvRows();
+  if (!rows || rows.length <= 1) return;
+  downloadCsvFile(`costco-trips-${appState.activeTab || "all"}.csv`, rows);
+}
+
 const STACK_COLORS = ["#2563eb", "#0ea5e9", "#a855f7", "#f97316", "#f43f5e"];
 const CHART_SUBTITLES = {
   all: "All spending channels combined.",
@@ -1908,6 +2233,7 @@ function renderMetricsChart() {
     drawNoChartData("Not enough data for this view.");
     return;
   }
+  chartState.lastDataset = { dataset, option: selected, tab: appState.activeTab };
   drawChartDataset(dataset);
 }
 
@@ -2906,6 +3232,40 @@ if (hasChrome) {
       }
     });
   }
+}
+
+function downloadCurrentChartCsv() {
+  const info = chartState.lastDataset;
+  if (!info || !info.dataset) return;
+  const { dataset, option, tab } = info;
+  const rows = [];
+
+  if (dataset.stacked && Array.isArray(dataset.series)) {
+    const header = ["Label"].concat(
+      dataset.series.map((s) => s.label || "")
+    );
+    rows.push(header);
+    const labelCount = dataset.labels.length;
+    for (let i = 0; i < labelCount; i += 1) {
+      const row = [dataset.labels[i]];
+      dataset.series.forEach((s) => {
+        row.push(s.values[i] || 0);
+      });
+      rows.push(row);
+    }
+  } else {
+    rows.push(["Label", option.label]);
+    const labels = dataset.labels || [];
+    const values = dataset.values || [];
+    labels.forEach((label, idx) => {
+      rows.push([label, values[idx] || 0]);
+    });
+  }
+
+  const filename = `costco-chart-${tab || "all"}-${
+    option && option.id ? option.id : "metric"
+  }.csv`;
+  downloadCsvFile(filename, rows);
 }
 function renderTopItemSections(itemStats, onlineData, filteredOnlineOrders) {
   if (!topItemsSection) return;

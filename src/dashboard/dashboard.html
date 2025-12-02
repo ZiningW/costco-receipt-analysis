@@ -29,6 +29,7 @@
             <option value="all">All Months</option>
           </select>
           <button id="downloadJsonBtn" type="button">Download JSON</button>
+          <button id="downloadCsvBtn" type="button">Download CSV</button>
           <button id="downloadPngBtn" type="button">Download Wrapped PNG</button>
         </div>
         <p id="dataCoverage" class="status">No data yet.</p>
@@ -55,6 +56,7 @@
           <p class="subtitle" id="chartSubtitle">Trends update with your filters.</p>
         </div>
         <div class="chart-controls" id="chartControls"></div>
+        <button id="downloadChartCsvBtn" type="button">Download Chart CSV</button>
       </div>
       <div class="chart-canvas-wrapper">
         <canvas id="metricsChart"></canvas>
@@ -63,7 +65,10 @@
     </section>
 
     <section class="card">
-      <h2><span class="icon">📋</span>Shopping Trips</h2>
+      <h2>
+        <span class="icon">📋</span>Shopping Trips
+        <button id="downloadTripsCsvBtn" type="button">Download Trips CSV</button>
+      </h2>
       <div class="tab-content active" id="allTab">
         <div class="table-scroll">
           <table>
